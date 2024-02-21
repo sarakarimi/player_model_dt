@@ -1,0 +1,7 @@
+1/
+data/
+trained_models/
+*__pycache__/
+gifs/
+.idea/
+wandb/
