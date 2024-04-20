@@ -17,16 +17,16 @@ def parse_args():
     parser.add_argument("--mode_conditioning", type=bool, default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument("--env_mode", type=int, default=1)
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--trajectory_paths", nargs='+')
+    parser.add_argument("--trajectory_paths", nargs='+', required=True)
     parser.add_argument("--n_heads", type=int, default=2)
     parser.add_argument("--d_mlp", type=int, default=256)
     parser.add_argument("--activation_fn", type=str, default="relu")
     parser.add_argument("--gated_mlp", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--n_layers", type=int, default=2)
+    parser.add_argument("--n_layers", type=int, default=1)
     parser.add_argument("--n_ctx", type=int, default=5)
     parser.add_argument("--layer_norm", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--train_epochs", type=int, default=1000)
+    parser.add_argument("--train_epochs", type=int, default=5000)
     parser.add_argument("--test_epochs", type=int, default=10)
     parser.add_argument("--optimizer", type=str, default="AdamW")
 
@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=0.0001)
     parser.add_argument("--lr_end", type=float, default=10e-8)
     parser.add_argument("--num_cycles", type=int, default=3)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--weight_decay", type=float, default=0.001)
     parser.add_argument("--state_embedding", type=str, default="grid")
     parser.add_argument(
         "--linear_time_embedding",
@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument(
         "--wandb_project_name",
         type=str,
-        default="DecisionTransformerInterpretability",
+        default="DT-MiniGrid",
     )
     parser.add_argument("--wandb_entity", type=str, default=None)
     parser.add_argument("--test_frequency", type=int, default=1000)

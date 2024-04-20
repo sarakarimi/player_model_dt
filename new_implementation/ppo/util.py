@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="MiniGrid-Dynamic-Obstacles-8x8-v0",
+        default="MiniGrid-double-goal",
         help="the name of this experiment",
     )
     parser.add_argument(
@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument(
         "--track",
         action="store_true",
-        default=False,
+        default=True,
         help="if toggled, this experiment will be tracked with Weights and Biases",
     )
     parser.add_argument(
@@ -64,7 +64,6 @@ def parse_args():
     parser.add_argument(
         "--env_id",
         type=str,
-        default="MiniGrid-Dynamic-Obstacles-8x8-v0",
         help="the environment id",
     )
     parser.add_argument(
@@ -74,12 +73,12 @@ def parse_args():
         help="the size of the hidden layers",
     )
     parser.add_argument(
-        "--view_size", type=int, default=7, help="the size of the view"
+        "--view_size", type=int, default=5, help="the size of the view"
     )
     parser.add_argument(
         "--total_timesteps",
         type=int,
-        default=5000000,
+        default=350000,
         help="the total number of timesteps to train for",
     )
     parser.add_argument(
@@ -97,7 +96,7 @@ def parse_args():
     parser.add_argument(
         "--num_envs",
         type=int,
-        default=10,
+        default=8,
         help="the number of parallel environments",
     )
     parser.add_argument(
@@ -166,7 +165,7 @@ def parse_args():
     parser.add_argument(
         "--one_hot_obs",
         action="store_true",
-        default=False,
+        default=True,
         help="if toggled, the environment will be partially observed one hot encoded",
     )
     parser.add_argument(
