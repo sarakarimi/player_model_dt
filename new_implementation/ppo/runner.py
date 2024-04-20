@@ -13,7 +13,7 @@ from new_implementation.configs import (
     RunConfig,
     TransformerModelConfig,
 )
-from new_implementation.env import make_env
+from new_implementation.make_env import make_env
 from train import train_ppo
 from util import set_global_seeds
 from trajectory_writer import TrajectoryWriter

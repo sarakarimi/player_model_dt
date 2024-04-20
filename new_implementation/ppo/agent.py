@@ -17,7 +17,7 @@ from new_implementation.configs import (
     RunConfig,
     TransformerModelConfig,
 )
-from new_implementation.env import make_env
+from new_implementation.make_env import make_env
 
 from loss_functions import (
     calc_clipped_surrogate_objective,

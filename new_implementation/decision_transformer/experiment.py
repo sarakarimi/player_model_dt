@@ -4,7 +4,7 @@ This file is the entry point for running the decision transformer.
 import torch as t
 
 from new_implementation.configs import RunConfig, TransformerModelConfig, OfflineTrainConfig
-from new_implementation.env import make_env
+from new_implementation.make_env import make_env
 from runner import run_decision_transformer
 from util import parse_args
 
