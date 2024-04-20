@@ -1,4 +1,3 @@
-import torch
 import sys
 import imageio
 import argparse
@@ -9,7 +8,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from envs.double_goal_minigrid import DoubleGoalEnv
 from minigrid.wrappers import RGBImgObsWrapper, ImgObsWrapper
 
-from utils.minigrid_wrappers import FullyObsFeatureWrapper
+from envs.minigrid_wrappers import FullyObsFeatureWrapper
 
 sys.modules["gym"] = gym
 

@@ -4,7 +4,7 @@ import torch
 
 from official_implementation.vector_obs.evaluation.bimodal_evalute import prompt_evaluate_episode_rtg, eval_and_gif
 from envs.double_goal_minigrid import DoubleGoalEnv
-from utils.minigrid_wrappers import FullyObsFeatureWrapper
+from envs.minigrid_wrappers import FullyObsFeatureWrapper
 
 
 def make_dataset(path):

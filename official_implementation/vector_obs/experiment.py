@@ -11,7 +11,7 @@ from envs.double_goal_minigrid import DoubleGoalEnv
 from evaluation.evaluate import evaluate_episode_rtg, eval_and_gif
 from models.decision_transformer import DecisionTransformer
 from training.seq_trainer import SequenceTrainer
-from utils.minigrid_wrappers import FullyObsFeatureWrapper
+from envs.minigrid_wrappers import FullyObsFeatureWrapper
 
 
 def discount_cumsum(x, gamma):

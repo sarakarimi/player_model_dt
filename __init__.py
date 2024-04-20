@@ -1,4 +1,4 @@
-from . import data, decision_transformers, envs, trained_models, utils
+from . import data, new_implementation, envs, trained_models, official_implementation, utils
 
 
-__all__ = ["data", "decision_transformers", "envs", "trained_models", "utils"]
+__all__ = ["data", "new_implementation", "envs", "trained_models", "official_implementation", "utils"]

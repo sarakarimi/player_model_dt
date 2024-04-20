@@ -7,10 +7,10 @@ from torch.nn import functional as F
 from decision_transformers.official_implementation.vector_obs.util_functions import eval_and_gif_multi_env
 from decision_transformers.official_implementation.vector_obs.models.bimodal_decision_transformer import BimodalDecisionTransformer
 from decision_transformers.official_implementation.vector_obs.training.bimodal_seq_trainer import BimodalSequenceTrainer
-from decision_transformers.official_implementation.vector_obs.util_functions import make_bimodal_dataset, process_info, get_batch, \
+from decision_transformers.official_implementation.vector_obs.util_functions import make_bimodal_dataset, process_info, \
     get_mode_batch, gen_env, get_env_list, eval_episodes, get_mode, load_checkpoint
 from envs.double_goal_minigrid import DoubleGoalEnv
-from utils.minigrid_wrappers import FullyObsFeatureWrapper
+from envs.minigrid_wrappers import FullyObsFeatureWrapper
 
 
 def bimodal_experiment(
