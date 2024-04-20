@@ -1,5 +1,5 @@
 # Player model Decision Transformer
-
+The code under `new_implementation` is taken from [DecisionTransformerInterpretability](https://github.com/jbloomAus/DecisionTransformerInterpretability/tree/main) repository.
 ## Requirements
 ```
 python 3.10.6
