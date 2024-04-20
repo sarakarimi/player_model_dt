@@ -34,22 +34,22 @@ def experiment(variant, train):
         )
     )
     max_ep_len = 28  # 50 # 100
-    env_targets = [0.64, 0.87, 1]
+    env_targets = [1, 0.87, 0]
     scale = 1.  # 1000.  # normalization for rewards/returns
 
     state_dim = 300  # env.observation_space.shape[0]
     act_dim = 1
-    K = 10  # 20  # 1 ##variant['K']
+    K = variant['K']
 
     # save trained model and wandb metrics
     dataset_name = "uni_modal_restricted"
     group_name = f'{env_name}-{dataset_name}-dataset'
     exp_prefix = f'mode-{env_mode}-vocab_size-{K}-max_episode_len-{max_ep_len}-exp_id-{random.randint(int(1e5), int(1e6) - 1)}'
     model_name = f'dt_double_goal-mode-{env_mode}-vocab_size-{K}-max_episode_len-{max_ep_len}-env-{env_name}-dataset-{dataset_name}'
-    checkpoint_path = f"../../trained_models/{model_name}.pth"
+    checkpoint_path = f"/home/sara/repositories/player_model_dt/trained_models/{model_name}.pth"
 
     # load dataset
-    dataset_path = "../../data/restricted_double_goal_mode_" + str(
+    dataset_path = "/home/sara/repositories/player_model_dt/data/restricted_double_goal_mode_" + str(
         env_mode) + "_image_ft_0_nsteps_100000_ppo_num_episodes100000_eps_0.1_gamma_0.99_dr_False.npz"
     trajectories = make_dataset(dataset_path)
 
@@ -104,7 +104,7 @@ def experiment(variant, train):
     # used to re-weight sampling, so we sample according to timesteps instead of trajectories
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
 
-    def get_batch(batch_size=256, max_len=K):
+    def get_batch(batch_size=128, max_len=K):
         batch_inds = np.random.choice(
             np.arange(num_trajectories),
             size=batch_size,
@@ -264,20 +264,20 @@ if __name__ == '__main__':
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
     parser.add_argument('--K', type=int, default=5)
     parser.add_argument('--pct_traj', type=float, default=1.)
-    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--embed_dim', type=int, default=128)
-    parser.add_argument('--n_layer', type=int, default=3)
+    parser.add_argument('--n_layer', type=int, default=2)
     parser.add_argument('--n_head', type=int, default=1)
     parser.add_argument('--activation_function', type=str, default='relu')
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--learning_rate', '-lr', type=float, default=1e-4)
-    parser.add_argument('--weight_decay', '-wd', type=float, default=1e-4)
+    parser.add_argument('--weight_decay', '-wd', type=float, default=1e-3)
     parser.add_argument('--warmup_steps', type=int, default=10000)
     parser.add_argument('--num_eval_episodes', type=int, default=100)
     parser.add_argument('--max_iters', type=int, default=10)
-    parser.add_argument('--num_steps_per_iter', type=int, default=100)
+    parser.add_argument('--num_steps_per_iter', type=int, default=5000)
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--log_to_wandb', '-w', type=bool, default=False)
+    parser.add_argument('--log_to_wandb', '-w', type=bool, default=True)
     args = parser.parse_args()
 
-    experiment(variant=vars(args), train=False)
+    experiment(variant=vars(args), train=True)

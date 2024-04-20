@@ -1,18 +1,13 @@
-import numpy as np
 import torch
 import torch.nn as nn
 
 import transformers
 
-from .model import TrajectoryModel
 from .trajectory_gpt2 import GPT2Model
 from torch.nn import functional as F
 
-class DecisionTransformer(TrajectoryModel):
 
-    """
-    This model uses GPT to model (Return_1, state_1, action_1, Return_2, state_2, ...)
-    """
+class BimodalDecisionTransformer(nn.Module):
 
     def __init__(
             self,
@@ -24,25 +19,26 @@ class DecisionTransformer(TrajectoryModel):
             action_tanh=True,
             **kwargs
     ):
-        super().__init__(state_dim, act_dim, max_length=max_length)
-
+        super().__init__()
+        self.state_dim = state_dim
+        self.act_dim = act_dim
+        self.max_length = max_length
         self.hidden_size = hidden_size
-        config = transformers.GPT2Config(
-            vocab_size=1,  # doesn't matter -- we don't use the vocab
-            n_embd=hidden_size,
-            **kwargs
-        )
+        config = transformers.GPT2Config(vocab_size=1, n_embd=hidden_size, **kwargs)
 
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
         self.transformer = GPT2Model(config)
+        # change to parallelize mode for metaworld big model
+        # self.transformer.parallelize()
 
         self.embed_timestep = nn.Embedding(max_ep_len, hidden_size)
-        self.embed_return = nn.Sequential(torch.nn.Linear(1, hidden_size), nn.Tanh())
-        self.embed_state = nn.Sequential(torch.nn.Linear(self.state_dim, hidden_size), nn.Tanh())
-        # self.embed_action = torch.nn.Linear(self.act_dim, hidden_size)
+        self.embed_return = torch.nn.Linear(1, hidden_size)
+        self.embed_state = torch.nn.Linear(self.state_dim, hidden_size)
         self.embed_action = nn.Sequential(nn.Embedding(self.act_dim, hidden_size))
         nn.init.normal_(self.embed_action[0].weight, mean=0.0, std=0.02)
+
+        self.embed_mode = torch.nn.Linear(1, hidden_size)
 
         self.embed_ln = nn.LayerNorm(hidden_size)
 
@@ -53,13 +49,12 @@ class DecisionTransformer(TrajectoryModel):
         )
         self.predict_return = torch.nn.Linear(hidden_size, 1)
 
-    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
-
+    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None, mode=None):
         batch_size, seq_length = states.shape[0], states.shape[1]
-
         if attention_mask is None:
             # attention mask for GPT: 1 if can be attended to, 0 if not
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long)
+
         # embed each modality with a different head
         state_embeddings = self.embed_state(states)
         action_embeddings = self.embed_action(actions.type(torch.long).squeeze(-1))
@@ -83,6 +78,35 @@ class DecisionTransformer(TrajectoryModel):
             (attention_mask, attention_mask, attention_mask), dim=1
         ).permute(0, 2, 1).reshape(batch_size, 3*seq_length)
 
+        # process prompt the same as d-t
+        if mode is not None:
+            mode_variable, mode_attention_mask = mode
+            mode_seq_length = mode_variable.shape[1]
+            mode_embeddings = self.embed_mode(mode_variable)
+            mode_embeddings = mode_embeddings #+ time_embeddings
+
+            mode_stacked_inputs = torch.stack(
+                (mode_embeddings, mode_embeddings, mode_embeddings), dim=1
+            ).permute(0, 2, 1, 3).reshape(mode_variable.shape[0], 3 * mode_seq_length, self.hidden_size)
+
+            # to make the attention mask fit the stacked inputs, have to stack it as well
+            mode_stacked_attention_mask = torch.stack(
+                (mode_attention_mask, mode_attention_mask, mode_attention_mask), dim=1
+            ).permute(0, 2, 1).reshape(mode_variable.shape[0], 3 * mode_seq_length)
+
+            # stacked_inputs add prompted sequence
+            if mode_stacked_inputs.shape[1] == 3 * seq_length: # if only smaple one prompt
+                mode_stacked_inputs = mode_stacked_inputs.reshape(1, -1, self.hidden_size)
+                mode_stacked_attention_mask = mode_stacked_attention_mask.reshape(1, -1)
+                stacked_inputs = torch.cat((mode_stacked_inputs.repeat(batch_size, 1, 1), stacked_inputs), dim=1)
+                stacked_attention_mask = torch.cat((mode_stacked_attention_mask.repeat(batch_size, 1), stacked_attention_mask), dim=1)
+            else: # if sample one prompt for each traj in batch
+                print(stacked_inputs.shape)
+                stacked_inputs = torch.cat((mode_stacked_inputs, stacked_inputs), dim=1)
+                stacked_attention_mask = torch.cat((mode_stacked_attention_mask, stacked_attention_mask), dim=1)
+                print(stacked_inputs.shape)
+                print(self.transformer)
+                exit(0)
         # we feed in the input embeddings (not word indices as in NLP) to the model
         transformer_outputs = self.transformer(
             inputs_embeds=stacked_inputs,
@@ -90,14 +114,18 @@ class DecisionTransformer(TrajectoryModel):
         )
         x = transformer_outputs['last_hidden_state']
 
-        # reshape x so that the second dimension corresponds to the original
-        # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
-        x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
+        if mode is None:
+            # reshape x so that the second dimension corresponds to the original
+            # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
+            x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
+        else:
+            x = x.reshape(batch_size, -1, 3, self.hidden_size).permute(0, 2, 1, 3)
 
+        # note here all the prompt are pre-append to x, but when return only return the last [:, -seq_length:, :] corresponding to batch data
         # get predictions
-        return_preds = self.predict_return(x[:,2])  # predict next return given state and action
-        state_preds = self.predict_state(x[:,2])    # predict next state given state and action
-        action_preds = self.predict_action(x[:,1])  # predict next action given state
+        return_preds = self.predict_return(x[:,2])[:, -seq_length:, :]  # predict next return given state and action
+        state_preds = self.predict_state(x[:,2])[:, -seq_length:, :]    # predict next state given state and action
+        action_preds = self.predict_action(x[:,1])[:, -seq_length:, :]  # predict next action given state
 
         return state_preds, action_preds, return_preds
 
@@ -135,6 +163,7 @@ class DecisionTransformer(TrajectoryModel):
         else:
             attention_mask = None
 
+        # Note: prompt within kwargs
         _, action_preds, return_preds = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
 
@@ -154,4 +183,4 @@ class DecisionTransformer(TrajectoryModel):
         # append to the sequence and continue
         # x = torch.cat((x, ix), dim=1)
         x = ix
-        return x #action_preds[0,-1]
+        return x  # action_preds[0,-1]

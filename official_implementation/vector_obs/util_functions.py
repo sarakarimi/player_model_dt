@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 
-from decision_transformers.vector_obs.evaluation.bimodal_evalute import prompt_evaluate_episode_rtg, eval_and_gif
+from official_implementation.vector_obs.evaluation.bimodal_evalute import prompt_evaluate_episode_rtg, eval_and_gif
 from envs.double_goal_minigrid import DoubleGoalEnv
 from utils.minigrid_wrappers import FullyObsFeatureWrapper
 

@@ -4,10 +4,10 @@ import argparse
 import random
 from torch.nn import functional as F
 
-from decision_transformers.vector_obs.util_functions import eval_and_gif_multi_env
-from decision_transformers.vector_obs.models.bimodal_decision_transformer import BimodalDecisionTransformer
-from decision_transformers.vector_obs.training.bimodal_seq_trainer import BimodalSequenceTrainer
-from decision_transformers.vector_obs.util_functions import make_bimodal_dataset, process_info, get_batch, \
+from decision_transformers.official_implementation.vector_obs.util_functions import eval_and_gif_multi_env
+from decision_transformers.official_implementation.vector_obs.models.bimodal_decision_transformer import BimodalDecisionTransformer
+from decision_transformers.official_implementation.vector_obs.training.bimodal_seq_trainer import BimodalSequenceTrainer
+from decision_transformers.official_implementation.vector_obs.util_functions import make_bimodal_dataset, process_info, get_batch, \
     get_mode_batch, gen_env, get_env_list, eval_episodes, get_mode, load_checkpoint
 from envs.double_goal_minigrid import DoubleGoalEnv
 from utils.minigrid_wrappers import FullyObsFeatureWrapper
@@ -37,11 +37,11 @@ def bimodal_experiment(
     mode = variant.get('mode', 'normal')
 
     # save trained model and wandb metrics
-    dataset_name = "bi_modal_restricted"
+    dataset_name = "long_uni_modal_restricted"
     group_name = f'{env_name}-{dataset_name}-dataset'
     exp_prefix = f'mode-{env_mode}-vocab_size-{K}-max_episode_len-{max_ep_len}-exp_id-{random.randint(int(1e5), int(1e6) - 1)}'
     model_name = f'dt_double_goal-mode-{env_mode}-vocab_size-{K}-max_episode_len-{max_ep_len}-env-{env_name}-dataset-{dataset_name}'
-    checkpoint_path = f"../../trained_models/{model_name}.pth"
+    checkpoint_path = f"/home/sara/repositories/player_model_dt/trained_models/{model_name}.pth"
 
 
     # load training dataset
@@ -156,7 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('--finetune_lr', type=float, default=1e-4)
     parser.add_argument('--no_state_normalize', action='store_true', default=False)
     parser.add_argument('--average_state_mean', action='store_true', default=True)
-    parser.add_argument('--evaluation', action='store_true', default=True)
+    parser.add_argument('--evaluation', action='store_true', default=False)
     parser.add_argument('--render', action='store_true', default=False)
     parser.add_argument('--load-path', type=str, default=None)  # choose a model when in evaluation mode
 
