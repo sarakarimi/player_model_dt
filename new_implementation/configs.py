@@ -197,9 +197,10 @@ class OfflineTrainConfig:
     eval_num_envs: int = 8
     initial_rtg: list[float] = (0.0, 1.0)
     model_type: str = "decision_transformer"
-    track: bool = False
+    track: bool = True
     device: str = "cpu"
-    mode: bool = False
+    mode_conditioning: bool = False
+    env_mode: int = 1
 
     def __post_init__(self):
         assert self.model_type in ["decision_transformer", "clone_transformer"]

@@ -45,7 +45,7 @@ def run_decision_transformer(
         prob_go_from_end=offline_config.prob_go_from_end,
         device=device,
         preprocess_observations=preprocess_observations,
-        mode=offline_config.mode
+        mode=offline_config.mode_conditioning
     )
 
     # make an environment
@@ -85,17 +85,18 @@ def run_decision_transformer(
             config=wandb_args,
         )
         trajectory_visualizer = TrajectoryVisualizer(trajectory_data_set)
-        fig = trajectory_visualizer.plot_reward_over_time()
-        wandb.log({"dataset/reward_over_time": wandb.Plotly(fig)})
-        fig = trajectory_visualizer.plot_base_action_frequencies()
-        wandb.log({"dataset/base_action_frequencies": wandb.Plotly(fig)})
-        wandb.log(
-            {"dataset/num_trajectories": trajectory_data_set.num_trajectories}
-        )
+        # fig = trajectory_visualizer.plot_reward_over_time()
+        # wandb.log({"dataset/reward_over_time": wandb.Plotly(fig)})
+        # fig = trajectory_visualizer.plot_base_action_frequencies()
+        # wandb.log({"dataset/base_action_frequencies": wandb.Plotly(fig)})
+        # wandb.log(
+        #     {"dataset/num_trajectories": trajectory_data_set.num_trajectories}
+        # )
 
     model = DecisionTransformer(
         environment_config=environment_config,
         transformer_config=transformer_config,
+        device=device,
     )
 
     model = train(
@@ -149,7 +150,7 @@ def store_transformer_model(path, model, offline_config):
 
 
 def set_device(run_config):
-    if run_config.device == t.device("cuda"):
+    if run_config.device == str(t.device("cuda")):
         if t.cuda.is_available():
             device = t.device("cuda")
         else:

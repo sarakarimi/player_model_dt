@@ -101,7 +101,7 @@ class BimodalDecisionTransformer(nn.Module):
                 stacked_inputs = torch.cat((mode_stacked_inputs.repeat(batch_size, 1, 1), stacked_inputs), dim=1)
                 stacked_attention_mask = torch.cat((mode_stacked_attention_mask.repeat(batch_size, 1), stacked_attention_mask), dim=1)
             else: # if sample one prompt for each traj in batch
-                print(stacked_inputs.shape)
+                print(stacked_inputs.shape, mode_stacked_inputs.shape)
                 stacked_inputs = torch.cat((mode_stacked_inputs, stacked_inputs), dim=1)
                 stacked_attention_mask = torch.cat((mode_stacked_attention_mask, stacked_attention_mask), dim=1)
                 print(stacked_inputs.shape)

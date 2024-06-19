@@ -64,6 +64,7 @@ def parse_args():
     parser.add_argument(
         "--env_id",
         type=str,
+        default="MiniGrid-double-goal",
         help="the environment id",
     )
     parser.add_argument(
@@ -153,8 +154,14 @@ def parse_args():
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default=None,
+        default="/home/sara/repositories/player_model_dt/data/PPO_trajectories_mode2.gz",
         help="the path to the trajectory file",
+    )
+    parser.add_argument(
+        "--mode",
+        type=int,
+        default=2,
+        help="the environment mode",
     )
     parser.add_argument(
         "--fully_observed",

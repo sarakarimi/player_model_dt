@@ -62,7 +62,8 @@ if __name__ == "__main__":
         track=args.track,
         convert_to_one_hot=args.convert_to_one_hot,
         device=run_config.device,
-        mode=args.mode_conditioning
+        mode_conditioning=args.mode_conditioning,
+        env_mode=args.env_mode
     )
 
     run_decision_transformer(

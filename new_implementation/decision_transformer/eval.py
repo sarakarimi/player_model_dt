@@ -27,10 +27,10 @@ def evaluate_dt_agent(
     device="cpu",
     num_envs=8,
     trajectory_writer=None,
-    mode=False,
+    mode_cond=False,
+    mode=0,
 ):
     model.eval()
-
     env = gymnasium.vector.SyncVectorEnv([env_func for _ in range(num_envs)])
     video_path = os.path.join("videos", env.envs[0].run_name)
 
@@ -71,10 +71,17 @@ def evaluate_dt_agent(
     action_pad_token = (
         env.single_action_space.n
     )  # current pad token for actions
-    obs, actions, reward, rtg, timesteps, mask = initialize_padding_inputs(
+
+    mode_one_hot = None
+    if mode_cond:
+        # TODO remove numbers replace with variable
+        mode_one_hot = t.zeros(2).to(device)
+        mode_one_hot[mode - 1] = 1
+    obs, actions, reward, rtg, timesteps, mask, modes = initialize_padding_inputs(
         max_len=max_len,
         initial_obs=obs,
         initial_rtg=initial_rtg,
+        mode=mode_one_hot,
         action_pad_token=action_pad_token,
         batch_size=num_envs,
         device=device,
@@ -85,7 +92,7 @@ def evaluate_dt_agent(
 
     # get first action
     _, action_preds, _ = model.forward(
-        states=obs, actions=actions, rtgs=rtg, timesteps=timesteps, mode=mode,
+        states=obs, actions=actions, rtgs=rtg, timesteps=timesteps, mode=modes,
     )
 
     new_action = t.argmax(action_preds[:, -1], dim=-1).squeeze(-1)
@@ -98,13 +105,14 @@ def evaluate_dt_agent(
         )
 
         # add new reward to init reward
-        new_rtg = rtg[:, -1:, :] - new_reward[None, :, None]
+
+        new_rtg = t.tensor(rtg[:, -1:, :]).to(device) - t.tensor(new_reward[None, :, None]).to(device)
         rtg = t.cat([rtg, new_rtg], dim=1)
 
         # add new timesteps
         # if we are done, we don't want to increment the timestep,
         # so we use the not operator to flip the done bit
-        new_timestep = timesteps[:, -1:, :] + np.invert(dones)[:, None, None]
+        new_timestep = timesteps[:, -1:, :] + t.tensor(np.invert(dones)[:, None, None]).to(device)
         timesteps = t.cat([timesteps, new_timestep], dim=1)
 
         if model.transformer_config.time_embedding_type == "linear":
@@ -120,9 +128,8 @@ def evaluate_dt_agent(
         actions = actions[:, -(max_len - 1) :] if max_len > 1 else None
         timesteps = timesteps[:, -max_len:]
         rtg = rtg[:, -max_len:]
-
         state_preds, action_preds, reward_preds = model.forward(
-            states=obs, actions=actions, rtgs=rtg, timesteps=timesteps, mode=mode,
+            states=obs, actions=actions, rtgs=rtg, timesteps=timesteps, mode=modes,
         )
 
         new_action = t.argmax(action_preds, dim=-1)[:, -1].squeeze(-1)
@@ -174,18 +181,20 @@ def evaluate_dt_agent(
                 _rtg,
                 timesteps[batch_reset_indexes],
                 mask[batch_reset_indexes],
+                _mode,
             ) = initialize_padding_inputs(
                 max_len=max_len,
                 initial_obs=_new_obs,
                 initial_rtg=initial_rtg,
+                mode=mode_one_hot,
                 action_pad_token=action_pad_token,
                 batch_size=sum(dones),
                 device=device,
             )
-
             # TODO: annoying dtype issues I'll solve another day...
             obs[batch_reset_indexes] = _obs.to(dtype=obs.dtype)
             rtg[batch_reset_indexes] = _rtg.to(dtype=rtg.dtype)
+            modes[batch_reset_indexes] = _mode.to(dtype=modes.dtype)
 
             # hack, obs, action, timesteps and rtg will all be modified on
             # next loop iteration so pad them appropriate to counteract this
@@ -213,7 +222,7 @@ def evaluate_dt_agent(
                     path_to_video = os.path.join(video_path, new_video)
                     wandb.log(
                         {
-                            f"media/video/{initial_rtg}/": wandb.Video(
+                            f"media/video/{initial_rtg}/mode_{mode}/": wandb.Video(
                                 path_to_video,
                                 fps=4,
                                 format="mp4",
@@ -248,7 +257,7 @@ def evaluate_dt_agent(
             if key == "traj_lengths":
                 wandb.log(
                     {
-                        f"eval/{str(initial_rtg)}/traj_lengths": wandb.Histogram(
+                        f"eval/{str(initial_rtg)}/mode_{mode}/traj_lengths": wandb.Histogram(
                             value
                         )
                     },
@@ -257,14 +266,14 @@ def evaluate_dt_agent(
             elif key == "rewards":
                 wandb.log(
                     {
-                        f"eval/{str(initial_rtg)}/rewards": wandb.Histogram(
+                        f"eval/{str(initial_rtg)}/mode_{mode}/rewards": wandb.Histogram(
                             value
                         )
                     },
                     step=batch_number,
                 )
             wandb.log(
-                {f"eval/{str(initial_rtg)}/" + key: value}, step=batch_number
+                {f"eval/{str(initial_rtg)}/mode_{mode}/" + key: value}, step=batch_number
             )
 
     return statistics

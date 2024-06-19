@@ -46,14 +46,14 @@ def train(
     )
     # can uncomment this to get logs of gradients and pars.
     # wandb.watch(model, log="all", log_freq=train_batches_per_epoch)
+    mode = None
     pbar = tqdm(range(offline_config.train_epochs))
     for epoch in pbar:
         for batch, traj in enumerate(train_dataloader):
-            if offline_config.mode:
+            if offline_config.mode_conditioning:
                 s, a, r, d, rtg, ti, m, mode = traj
             else:
                 s, a, r, d, rtg, ti, m = traj
-                mode = False
 
             total_batches = epoch * train_batches_per_epoch + batch
 
@@ -75,17 +75,14 @@ def train(
                 timesteps=ti.unsqueeze(-1),
                 mode=mode
             )
-
             action_preds = rearrange(action_preds, "b t a -> (b t) a")
-            # print(a)
             a_exp = rearrange(a, "b t -> (b t)").to(t.int64)
-            # print(action_preds.shape, a_exp.shape, env.action_space.n)
+
             # ignore dummy action
             loss = loss_fn(
                 action_preds[a_exp != env.action_space.n],
                 a_exp[a_exp != env.action_space.n],
             )
-
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -117,7 +114,7 @@ def train(
                 epochs=offline_config.test_epochs,
                 track=offline_config.track,
                 batch_number=total_batches,
-                mode=offline_config.mode
+                mode_cond=offline_config.mode_conditioning
             )
 
         eval_env_config = EnvironmentConfig(
@@ -133,27 +130,35 @@ def train(
             else 7,
         )
 
+        if offline_config.mode_conditioning:
+            mode = 0
+        else:
+            mode = offline_config.env_mode
+
         eval_env_func = make_env(
             config=eval_env_config,
             seed=batch,
             idx=0,
             run_name=f"dt_eval_videos_{batch}",
-            mode=offline_config.mode
+            mode=mode
         )
 
+        eval_env_modes = [1, 2]
         if epoch % offline_config.eval_frequency == 0:
             for rtg in offline_config.initial_rtg:
-                evaluate_dt_agent(
-                    model=model,
-                    env_func=eval_env_func,
-                    trajectories=offline_config.eval_episodes,
-                    track=offline_config.track,
-                    batch_number=total_batches,
-                    initial_rtg=float(rtg),
-                    device=device,
-                    num_envs=offline_config.eval_num_envs,
-                    mode=offline_config.mode,
-                )
+                for mode in eval_env_modes:
+                    evaluate_dt_agent(
+                        model=model,
+                        env_func=eval_env_func,
+                        trajectories=offline_config.eval_episodes,
+                        track=offline_config.track,
+                        batch_number=total_batches,
+                        initial_rtg=float(rtg),
+                        device=device,
+                        num_envs=offline_config.eval_num_envs,
+                        mode_cond=offline_config.mode_conditioning,
+                        mode=mode
+                    )
 
     return model
 
@@ -165,7 +170,7 @@ def test(
     epochs=10,
     track=False,
     batch_number=0,
-    mode=False,
+    mode_cond=False,
 ):
     model.eval()
 
@@ -180,11 +185,11 @@ def test(
 
     for epoch in pbar:
         for batch, traj in enumerate(dataloader):
-            if mode:
+            if mode_cond:
                 s, a, r, d, rtg, ti, m, mode = traj
             else:
                 s, a, r, d, rtg, ti, m = traj
-                mode = False
+                mode_cond = False
             if model.transformer_config.time_embedding_type == "linear":
                 ti = ti.to(t.float32)
 

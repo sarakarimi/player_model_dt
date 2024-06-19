@@ -7,7 +7,7 @@ import time
 from wandb import env
 import copy
 
-from decision_transformers.official_implementation.vector_obs.util_functions import flatten_mode
+from official_implementation.vector_obs.util_functions import flatten_mode
 
 
 class BimodalSequenceTrainer:

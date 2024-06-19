@@ -27,6 +27,7 @@ if __name__ == "__main__":
         capture_video=args.capture_video,
         view_size=args.view_size,
         device=run_config.device,
+        env_mode=args.mode
     )
 
     online_config = OnlineTrainConfig(

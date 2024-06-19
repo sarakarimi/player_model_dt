@@ -63,104 +63,125 @@ class TrajectoryDataset(Dataset):
         self.mode = mode
 
     def load_trajectories(self) -> None:
-        observations, actions, rewards, dones, truncated, infos, modes = [], [], [], [], [], [], []
+        merge_observations, merge_actions, merge_rewards, merge_dones, merge_truncated, merge_infos, merge_modes, merge_timesteps = [], [], [], [], [], [], [], []
 
         # Iterating over many dataset with different environment modes or play styles
         for i, path in enumerate(self.trajectory_paths):
             traj_reader = TrajectoryReader(path)
             data = traj_reader.read()
-
-            observations.extend(data["data"].get("observations"))
-            actions.extend(data["data"].get("actions"))
-            rewards.extend(data["data"].get("rewards"))
-            dones.extend(data["data"].get("dones"))
-            truncated.extend(data["data"].get("truncated"))
-            infos.extend(data["data"].get("infos"))
+            observations = data["data"].get("observations")
+            actions = data["data"].get("actions")
+            rewards = data["data"].get("rewards")
+            dones = data["data"].get("dones")
+            truncated = data["data"].get("truncated")
+            infos = data["data"].get("infos")
             mode = np.zeros((int(len(dones) / (i + 1)), 8, 2))
             mode[:, :, i] = 1
-            modes.extend(mode)
+            modes = mode
 
-        observations = np.array(observations)
-        actions = np.array(actions)
-        rewards = np.array(rewards)
-        dones = np.array(dones)
-        infos = np.array(infos, dtype=np.ndarray)
-        modes = np.array(modes)
+            # from collections import Counter
+            # returns = ['%.2f' % r.sum() for r in rewards]
+            # print(Counter(returns))
+            observations = np.array(observations)
+            actions = np.array(actions)
+            rewards = np.array(rewards)
+            dones = np.array(dones)
+            infos = np.array(infos, dtype=np.ndarray)
+            modes = np.array(modes)
 
-        # check whether observations are flat or an image
-        if observations.shape[-1] == 3:
-            self.observation_type = "index"
-        elif observations.shape[-1] == 20:
-            self.observation_type = "one_hot"
-        else:
-            raise ValueError(
-                "Observations are not flat or images, check the shape of the observations: ",
-                observations.shape,
-            )
+            # check whether observations are flat or an image
+            if observations.shape[-1] == 3:
+                self.observation_type = "index"
+            elif observations.shape[-1] == 20:
+                self.observation_type = "one_hot"
+            else:
+                raise ValueError(
+                    "Observations are not flat or images, check the shape of the observations: ",
+                    observations.shape,
+                )
 
-        if self.observation_type != "flat":
-            t_observations = rearrange(
-                torch.tensor(observations), "t b h w c -> (b t) h w c"
-            )
-        else:
-            t_observations = rearrange(
-                torch.tensor(observations), "t b f -> (b t) f"
-            )
+            if self.observation_type != "flat":
+                t_observations = rearrange(
+                    torch.tensor(observations), "t b h w c -> (b t) h w c"
+                )
+            else:
+                t_observations = rearrange(
+                    torch.tensor(observations), "t b f -> (b t) f"
+                )
 
-        t_actions = rearrange(torch.tensor(actions), "t b -> (b t)")
-        t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
-        t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
-        t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
-        t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
-        t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
-        done_indices = torch.where(t_done_or_truncated)[0]
+            t_actions = rearrange(torch.tensor(actions), "t b -> (b t)")
+            t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
+            t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
+            t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
+            t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
+            t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
+            done_indices = torch.where(t_done_or_truncated)[0]
 
-        self.actions = torch.tensor_split(t_actions, done_indices + 1)
-        self.rewards = torch.tensor_split(t_rewards, done_indices + 1)
-        self.dones = torch.tensor_split(t_dones, done_indices + 1)
-        self.truncated = torch.tensor_split(t_truncated, done_indices + 1)
-        self.states = torch.tensor_split(t_observations, done_indices + 1)
-        self.modes = torch.tensor_split(t_modes, done_indices + 1)
-        self.returns = [r.sum() for r in self.rewards]
-        self.timesteps = [torch.arange(len(i)) for i in self.states]
-        self.traj_lens = np.array([len(i) for i in self.states])
+            self.actions = torch.tensor_split(t_actions, done_indices + 1)
+            self.rewards = torch.tensor_split(t_rewards, done_indices + 1)
+            self.dones = torch.tensor_split(t_dones, done_indices + 1)
+            self.truncated = torch.tensor_split(t_truncated, done_indices + 1)
+            self.states = torch.tensor_split(t_observations, done_indices + 1)
+            self.modes = torch.tensor_split(t_modes, done_indices + 1)
+            self.returns = [r.sum() for r in self.rewards]
+            self.timesteps = [torch.arange(len(i)) for i in self.states]
+            self.traj_lens = np.array([len(i) for i in self.states])
 
-        # remove trajs with length 0
-        traj_len_mask = self.traj_lens > 0
-        self.actions = [i for i, m in zip(self.actions, traj_len_mask) if m]
-        self.rewards = [i for i, m in zip(self.rewards, traj_len_mask) if m]
-        self.dones = [i for i, m in zip(self.dones, traj_len_mask) if m]
-        self.truncated = [
-            i for i, m in zip(self.truncated, traj_len_mask) if m
-        ]
-        self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
-        self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
-        self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
-        self.timesteps = [
-            i for i, m in zip(self.timesteps, traj_len_mask) if m
-        ]
-        self.traj_lens = self.traj_lens[traj_len_mask]
+            # remove trajs with length 0
+            traj_len_mask = self.traj_lens > 0
+            self.actions = [i for i, m in zip(self.actions, traj_len_mask) if m]
+            self.rewards = [i for i, m in zip(self.rewards, traj_len_mask) if m]
+            self.dones = [i for i, m in zip(self.dones, traj_len_mask) if m]
+            self.truncated = [
+                i for i, m in zip(self.truncated, traj_len_mask) if m
+            ]
+            self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
+            self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
+            self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
+            self.timesteps = [
+                i for i, m in zip(self.timesteps, traj_len_mask) if m
+            ]
+            self.traj_lens = self.traj_lens[traj_len_mask]
 
-        self.num_timesteps = sum(self.traj_lens)
-        self.num_trajectories = len(self.states)
+            self.num_timesteps = sum(self.traj_lens)
+            self.num_trajectories = len(self.states)
 
-        self.state_dim = list(self.states[0][0].shape)
-        self.act_dim = list(self.actions[0][0].shape)
-        self.max_ep_len = max([len(i) for i in self.states])
-        self.metadata = data["metadata"]
+            self.state_dim = list(self.states[0][0].shape)
+            self.act_dim = list(self.actions[0][0].shape)
+            self.max_ep_len = max([len(i) for i in self.states])
+            self.metadata = data["metadata"]
 
-        self.indices = self.get_indices_of_top_p_trajectories(self.pct_traj)
-        self.sampling_probabilities = self.get_sampling_probabilities()
+            self.indices = self.get_indices_of_top_p_trajectories(self.pct_traj)
+            self.sampling_probabilities = self.get_sampling_probabilities()
 
-        if self.normalize_state:
-            self.state_mean, self.state_std = self.get_state_mean_std()
-        else:
-            self.state_mean = 0
-            self.state_std = 1
+            if self.normalize_state:
+                self.state_mean, self.state_std = self.get_state_mean_std()
+            else:
+                self.state_mean = 0
+                self.state_std = 1
 
-        # TODO Make this way less hacky
-        if self.preprocess_observations == one_hot_encode_observation:
-            self.observation_type = "one_hot"
+            # TODO Make this way less hacky
+            if self.preprocess_observations == one_hot_encode_observation:
+                self.observation_type = "one_hot"
+
+            # merge datasets
+            merge_actions.extend(self.actions)
+            merge_rewards.extend(self.rewards)
+            merge_dones.extend(self.dones)
+            merge_truncated.extend(self.truncated)
+            merge_observations.extend(self.states)
+            merge_modes.extend(self.modes)
+            merge_rewards.extend(self.returns)
+            merge_timesteps.extend(self.timesteps)
+
+        self.actions = merge_actions
+        self.rewards = merge_rewards
+        self.dones = merge_dones
+        self.truncated = merge_truncated
+        self.states = merge_observations
+        self.modes = merge_modes
+        self.returns = merge_rewards
+        self.timesteps = merge_timesteps
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
         num_timesteps = max(int(pct_traj * self.num_timesteps), 1)
@@ -434,7 +455,7 @@ class TrajectoryVisualizer:
 def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
     """Converts a batch of observations into one-hot encoded numpy arrays."""
 
-    img = img.to(int).numpy()
+    img = img.to(int)  # .numpy()
     batch_size, height, width, num_channels = img.shape
     num_bits = 20
     new_observation_space = (batch_size, height, width, num_bits)
