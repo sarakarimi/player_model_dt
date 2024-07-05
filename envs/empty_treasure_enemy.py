@@ -67,8 +67,8 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
         agent_start_pos=(1, 1),
         agent_start_dir=0,
         max_steps: int | None = None,
-        reward_treasure: bool = True,
-        reward_enemy: bool = True,
+        reward_treasure: bool = False,
+        reward_enemy: bool = False,
         **kwargs,
     ):
         self.agent_start_pos = agent_start_pos
@@ -87,6 +87,7 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
             agent_view_size=11,
             reward_treasure=reward_treasure,
             reward_enemy=reward_enemy,
+            attack_chance=0.5,
             **kwargs,
         )
 

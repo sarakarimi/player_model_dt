@@ -89,7 +89,7 @@ class MiniGridDungeonEnv(gym.Env):
         )
 
         # Range of possible rewards
-        self.reward_range = (0, 1)
+        self.reward_range = (-1, 1)
         self.num_treasures = num_treasures
         self.num_enemies = num_enemies
         self.use_reward_treasure = reward_treasure
@@ -597,6 +597,7 @@ class MiniGridDungeonEnv(gym.Env):
                     reward *= self.reward_enemy
             if fwd_cell is not None and fwd_cell.type == "lava":
                 terminated = True
+                reward = -1.0
 
         # Pick up an object
         elif action == self.actions.pickup:
@@ -609,8 +610,6 @@ class MiniGridDungeonEnv(gym.Env):
                     self.reward_treasure += 1.0/self.num_treasures
                     fwd_cell.cur_pos = np.array([-1, -1])
                     self.grid.set(fwd_pos[0], fwd_pos[1], None)
-                    print(f"reward_treasure: {self.reward_treasure}")
-                    print(f"num_treasures: {self.num_treasures}")
                 if self.carrying is None:
                     self.carrying = fwd_cell
                     self.carrying.cur_pos = np.array([-1, -1])
@@ -622,18 +621,16 @@ class MiniGridDungeonEnv(gym.Env):
                 if fwd_cell.type == "enemy":
                     if self.agent_state == 1: # If the agent has a weapon, he automatically wins the fight
                         self.reward_enemy += 1.0/self.num_enemies if self.use_reward_enemy else 0.0
-                        print(f"reward_enemy: {self.reward_enemy}")
                         fwd_cell.cur_pos = np.array([-1, -1])
                         self.grid.set(fwd_pos[0], fwd_pos[1], None)
                     else:
                         if self._rand_float(0, 1) < self.attack_chance: # The agent has a chance to win the fight and wins
                             self.reward_enemy += 1.0/self.num_enemies if self.use_reward_enemy else 0.0
-                            print(f"reward_enemy: {self.reward_enemy}")
                             fwd_cell.cur_pos = np.array([-1, -1])
                             self.grid.set(fwd_pos[0], fwd_pos[1], None)
                         else:   # The agent loses the fight
                             terminated = True
-                            print("Player got killed by the enemy")
+                            reward = -1.0
 
         # Drop an object
         elif action == self.actions.drop:
@@ -658,7 +655,7 @@ class MiniGridDungeonEnv(gym.Env):
         for pos in self.adjacent_minus_front_pos():
             cell = self.grid.get(*pos)
             if cell and cell.type == "enemy":
-                reward = 0.0
+                reward = -1.0
                 terminated = True
 
         if self.step_count >= self.max_steps:

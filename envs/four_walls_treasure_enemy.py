@@ -85,7 +85,7 @@ class FourRoomsTreasureEnemyEnv(MiniGridDungeonEnv):
             agent_view_size=11,
             reward_treasure=reward_treasure,
             reward_enemy=reward_enemy,
-            attack_chance=1.0,
+            attack_chance=0.5,
             **kwargs,
         )
 
