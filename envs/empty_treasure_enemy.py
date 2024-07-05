@@ -12,13 +12,8 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
     ## Description
 
     This environment is an empty room, and the goal of the agent is to reach the
-    green goal square, which provides a sparse reward. A small penalty is
-    subtracted for the number of steps to reach the goal. This environment is
-    useful, with small rooms, to validate that your RL algorithm works
-    correctly, and with large rooms to experiment with sparse rewards and
-    exploration. The random variants of the environment have the agent starting
-    at a random position for each episode, while the regular variants have the
-    agent always starting in the corner opposite to the goal.
+    green goal square, pick up the treasure and kill the enemy, which provides a sparse reward. 
+    A small penalty is subtracted for the number of steps to reach the goal.
 
     ## Mission Space
 
@@ -53,6 +48,7 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
       - Enemy Reward = '1' for killing the enemy, and '0' for failure.
     The total reward is computed as
     `reward = goal_reward * treasure_reward * enemy_reward'
+    The reward is only given if the agent reaches the goal.
     Note: if reward_treasure or reward_enemy is set to False, the corresponding reward is not given (i.e., equal to one automatically).
 
     ## Termination
@@ -63,7 +59,6 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
     2. The agent is killed by the enemy.
     3. The agent falls into the lava.
     4. Timeout (see `max_steps`).
-
     """
 
     def __init__(

@@ -9,6 +9,58 @@ from envs.minigrid_dungeon.minigrid_env import MiniGridDungeonEnv
 
 
 class FourRoomsTreasureEnemyEnv(MiniGridDungeonEnv):
+    """
+    ## Description
+
+    This environment is sequence of four connected rooms, and the goal of the agent is to reach the
+    green goal square, pick up the treasure and kill the enemy, which provides a sparse reward. 
+    A small penalty is subtracted for the number of steps to reach the goal.
+
+    ## Mission Space
+
+    "get to the green goal square, pick up the treasure and kill the enemy."
+
+    ## Action Space
+
+    | Num | Name         | Action                      |
+    |-----|--------------|-----------------------------|
+    | 0   | left         | Turn left                   |
+    | 1   | right        | Turn right                  |
+    | 2   | forward      | Move forward                |
+    | 3   | pickup       | Pickup Treasure and Weapons |
+    | 4   | drop         | Unused                      |
+    | 5   | toggle       | Unused                      |
+    | 6   | done         | Unused                      |
+    | 7   | attack       | Atack agent (in front)      |
+
+    ## Observation Encoding
+
+    - Each tile is encoded as a 3 dimensional tuple:
+        `(OBJECT_IDX, COLOR_IDX, STATE)`
+    - `OBJECT_TO_IDX` and `COLOR_TO_IDX` mapping can be found in
+        [minigrid/core/constants.py](minigrid/core/constants.py)
+    - `STATE` refers to the door state with 0=open, 1=closed and 2=locked
+
+    ## Rewards
+
+    The reward is multi-component:
+    - Goal Reward = '1 - 0.9 * (step_count / max_steps)' is given for success, and '0' for failure.
+    - Treasure Reward = '1' for picking up the treasure, and '0' for failure.
+    - Enemy Reward = '1' for killing the enemy, and '0' for failure.
+    The total reward is computed as
+    `reward = goal_reward * treasure_reward * enemy_reward'
+    The reward is only given if the agent reaches the goal.
+    Note: if reward_treasure or reward_enemy is set to False, the corresponding reward is not given (i.e., equal to one automatically).
+
+    ## Termination
+
+    The episode ends if any one of the following conditions is met:
+
+    1. The agent reaches the goal.
+    2. The agent is killed by the enemy.
+    3. The agent falls into the lava.
+    4. Timeout (see `max_steps`).
+    """
 
     def __init__(self,
                 agent_pos=None,
