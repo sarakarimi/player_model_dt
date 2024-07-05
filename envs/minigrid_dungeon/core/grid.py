@@ -186,7 +186,7 @@ class Grid:
             if agent_state == 0:
                 fill_coords(img, tri_fn, (231, 76, 60))
             else:
-                fill_coords(img, tri_fn, (155, 89, 182))
+                fill_coords(img, tri_fn, (189, 195, 199))
 
         # Highlight the cell if needed
         if highlight:

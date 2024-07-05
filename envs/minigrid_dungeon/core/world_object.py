@@ -462,7 +462,7 @@ class Enemy(WorldObj):
             radius = 0.2  # Normalized radius of the central ball
             num_spikes = 10  # Total number of spikes
             spike_length = 0.3  # Normalized length of spikes
-            spike_width = 0.015  # Normalized width of each spike
+            spike_width = 0.1  # Normalized width of each spike
 
             def spiky_ball_fn(x, y):
                 # Check if inside the main ball

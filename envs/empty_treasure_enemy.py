@@ -22,19 +22,20 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
 
     ## Mission Space
 
-    "get to the green goal square"
+    "get to the green goal square, pick up the treasure and kill the enemy."
 
     ## Action Space
 
-    | Num | Name         | Action       |
-    |-----|--------------|--------------|
-    | 0   | left         | Turn left    |
-    | 1   | right        | Turn right   |
-    | 2   | forward      | Move forward |
-    | 3   | pickup       | Unused       |
-    | 4   | drop         | Unused       |
-    | 5   | toggle       | Unused       |
-    | 6   | done         | Unused       |
+    | Num | Name         | Action                      |
+    |-----|--------------|-----------------------------|
+    | 0   | left         | Turn left                   |
+    | 1   | right        | Turn right                  |
+    | 2   | forward      | Move forward                |
+    | 3   | pickup       | Pickup Treasure and Weapons |
+    | 4   | drop         | Unused                      |
+    | 5   | toggle       | Unused                      |
+    | 6   | done         | Unused                      |
+    | 7   | attack       | Atack agent (in front)      |
 
     ## Observation Encoding
 
@@ -46,32 +47,33 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
 
     ## Rewards
 
-    A reward of '1 - 0.9 * (step_count / max_steps)' is given for success, and '0' for failure.
+    The reward is multi-component:
+      - Goal Reward = '1 - 0.9 * (step_count / max_steps)' is given for success, and '0' for failure.
+      - Treasure Reward = '1' for picking up the treasure, and '0' for failure.
+      - Enemy Reward = '1' for killing the enemy, and '0' for failure.
+    The total reward is computed as
+    `reward = goal_reward * treasure_reward * enemy_reward'
+    Note: if reward_treasure or reward_enemy is set to False, the corresponding reward is not given (i.e., equal to one automatically).
 
     ## Termination
 
     The episode ends if any one of the following conditions is met:
 
     1. The agent reaches the goal.
-    2. Timeout (see `max_steps`).
-
-    ## Registered Configurations
-
-    - `MiniGrid-Empty-5x5-v0`
-    - `MiniGrid-Empty-Random-5x5-v0`
-    - `MiniGrid-Empty-6x6-v0`
-    - `MiniGrid-Empty-Random-6x6-v0`
-    - `MiniGrid-Empty-8x8-v0`
-    - `MiniGrid-Empty-16x16-v0`
+    2. The agent is killed by the enemy.
+    3. The agent falls into the lava.
+    4. Timeout (see `max_steps`).
 
     """
 
     def __init__(
         self,
-        size=12,
+        size=10,
         agent_start_pos=(1, 1),
         agent_start_dir=0,
         max_steps: int | None = None,
+        reward_treasure: bool = True,
+        reward_enemy: bool = True,
         **kwargs,
     ):
         self.agent_start_pos = agent_start_pos
@@ -85,17 +87,17 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
         super().__init__(
             mission_space=mission_space,
             grid_size=size,
-            # Set this to True for maximum speed
             see_through_walls=True,
             max_steps=max_steps,
-            reward_treasure=True,
-            reward_enemy=True,
+            agent_view_size=11,
+            reward_treasure=reward_treasure,
+            reward_enemy=reward_enemy,
             **kwargs,
         )
 
     @staticmethod
     def _gen_mission():
-        return "get to the green goal square and pick up the treasure"
+        return "get to the green goal square, pick up the treasure and kill the enemy."
 
     def _gen_grid(self, width, height):
         # Create an empty grid
