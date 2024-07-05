@@ -92,7 +92,7 @@ class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):
 
     @staticmethod
     def _gen_mission():
-        return "get to the green goal square, pick up the treasure and kill the enemy."
+        return "get to the green goal, pick up treasure and kill enemy."
 
     def _gen_grid(self, width, height):
         # Create an empty grid

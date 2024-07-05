@@ -91,7 +91,7 @@ class FourRoomsTreasureEnemyEnv(MiniGridDungeonEnv):
 
     @staticmethod
     def _gen_mission():
-        return "reach the goal"
+        return "reach the goal, pick up treasure and kill the enemy."
 
     def _gen_grid(self, width, height):
         # Create the grid
