@@ -124,6 +124,9 @@ class TrajectoryDataset(Dataset):
             self.states = torch.tensor_split(t_observations, done_indices + 1)
             self.modes = torch.tensor_split(t_modes, done_indices + 1)
             self.returns = [r.sum() for r in self.rewards]
+            self.returns = ['%.2f' % elem for elem in self.returns]
+            unique, counts = np.unique(self.returns, return_counts=True)
+            print(unique, counts)
             self.timesteps = [torch.arange(len(i)) for i in self.states]
             self.traj_lens = np.array([len(i) for i in self.states])
 
@@ -476,3 +479,8 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
                 ] = 1
 
     return torch.from_numpy(out).float()
+
+
+if __name__ == '__main__':
+    path = "/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_01_trajectories_mode2.gz"
+    trajectory_data_set = TrajectoryDataset(trajectory_paths=[path])

@@ -7,3 +7,6 @@ gifs/
 wandb/
 video/
 videos/
+*.pt
+*.hdf5
+/official_implementation/vector_obs/model_saved

@@ -70,9 +70,7 @@ def prompt_evaluate_episode_rtg(
             )
 
         actions[-1] = action
-        # action = action.detach().cpu().numpy()
-        #
-        # state, reward, done, infos = env.step(action)
+        # print(action.cpu().numpy())
         state, reward, terminated, truncated, info = env.step(action.cpu().numpy()[0, -1])
 
         state = state.flatten()
@@ -149,7 +147,6 @@ def eval_and_gif(env, model, eval_iter, model_name, target_ret, state_mean, stat
                 mode=prompt
             )
             actions[-1] = action
-
             state, reward, terminated, truncated, info = env.step(action.cpu().numpy()[0, -1])
             # print("reward", reward)
             state = state.flatten()

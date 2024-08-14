@@ -374,9 +374,10 @@ def load_saved_checkpoint(path, num_envs=10) -> PPOAgent:
     environment_config = EnvironmentConfig(
         **json.loads(saved_state["environment_config"])
     )
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(environment_config, 0, 0, "test", mode=environment_config.env_mode) for _ in range(num_envs)]
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(environment_config, 0, 0, "test", mode=environment_config.env_mode) for _ in range(num_envs)], shared_memory=False,
     )
+    print(envs.num_envs)
 
     # create the model config
     other_args = json.loads(saved_state["model_config"])
@@ -402,7 +403,7 @@ def load_saved_checkpoint(path, num_envs=10) -> PPOAgent:
 
     # create the model
     agent = get_agent(
-        model_config=model_config,
+        # model_config=model_config,
         envs=envs,
         environment_config=environment_config,
         online_config=online_config,

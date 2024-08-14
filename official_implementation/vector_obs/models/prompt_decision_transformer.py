@@ -1,3 +1,5 @@
+# Code backbone: Decision Transformer https://github.com/kzl/decision-transformer/
+# Decision Transformer License: https://github.com/kzl/decision-transformer/blob/master/LICENSE.md
 import torch
 import torch.nn as nn
 
@@ -7,7 +9,7 @@ from .trajectory_gpt2 import GPT2Model
 from torch.nn import functional as F
 
 
-class BimodalDecisionTransformer(nn.Module):
+class PromptDecisionTransformer(nn.Module):
 
     def __init__(
             self,
@@ -35,10 +37,16 @@ class BimodalDecisionTransformer(nn.Module):
         self.embed_timestep = nn.Embedding(max_ep_len, hidden_size)
         self.embed_return = torch.nn.Linear(1, hidden_size)
         self.embed_state = torch.nn.Linear(self.state_dim, hidden_size)
-        self.embed_action = nn.Sequential(nn.Embedding(self.act_dim, hidden_size))
+        # self.embed_action = torch.nn.Linear(self.act_dim, hidden_size)
+        self.embed_action = nn.Sequential(nn.Embedding(self.act_dim + 1, hidden_size))
         nn.init.normal_(self.embed_action[0].weight, mean=0.0, std=0.02)
 
-        self.embed_mode = torch.nn.Linear(1, hidden_size)
+        self.prompt_embed_timestep = nn.Embedding(max_ep_len, hidden_size)
+        self.prompt_embed_return = torch.nn.Linear(1, hidden_size)
+        self.prompt_embed_state = torch.nn.Linear(self.state_dim, hidden_size)
+        # self.prompt_embed_action = torch.nn.Linear(self.act_dim, hidden_size)
+        self.prompt_embed_action = nn.Sequential(nn.Embedding(self.act_dim, hidden_size))
+        nn.init.normal_(self.prompt_embed_action[0].weight, mean=0.0, std=0.02)
 
         self.embed_ln = nn.LayerNorm(hidden_size)
 
@@ -49,7 +57,7 @@ class BimodalDecisionTransformer(nn.Module):
         )
         self.predict_return = torch.nn.Linear(hidden_size, 1)
 
-    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None, mode=None):
+    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None, prompt=None):
         batch_size, seq_length = states.shape[0], states.shape[1]
         if attention_mask is None:
             # attention mask for GPT: 1 if can be attended to, 0 if not
@@ -57,9 +65,9 @@ class BimodalDecisionTransformer(nn.Module):
 
         # embed each modality with a different head
         state_embeddings = self.embed_state(states)
-        action_embeddings = self.embed_action(actions.type(torch.long).squeeze(-1))
         returns_embeddings = self.embed_return(returns_to_go)
         time_embeddings = self.embed_timestep(timesteps)
+        action_embeddings = self.embed_action(actions.type(torch.long).squeeze(-1))
 
         # time embeddings are treated similar to positional embeddings
         state_embeddings = state_embeddings + time_embeddings
@@ -70,39 +78,49 @@ class BimodalDecisionTransformer(nn.Module):
         # which works nice in an autoregressive sense since states predict actions
         stacked_inputs = torch.stack(
             (returns_embeddings, state_embeddings, action_embeddings), dim=1
-        ).permute(0, 2, 1, 3).reshape(batch_size, 3*seq_length, self.hidden_size)
+        ).permute(0, 2, 1, 3).reshape(batch_size, 3 * seq_length, self.hidden_size)
         stacked_inputs = self.embed_ln(stacked_inputs)
 
         # to make the attention mask fit the stacked inputs, have to stack it as well
         stacked_attention_mask = torch.stack(
             (attention_mask, attention_mask, attention_mask), dim=1
-        ).permute(0, 2, 1).reshape(batch_size, 3*seq_length)
+        ).permute(0, 2, 1).reshape(batch_size, 3 * seq_length)
 
         # process prompt the same as d-t
-        if mode is not None:
-            mode_variable, mode_attention_mask = mode
-            mode_seq_length = mode_variable.shape[1]
-            mode_embeddings = self.embed_mode(mode_variable)
-            mode_embeddings = mode_embeddings #+ time_embeddings
+        if prompt is not None:
+            prompt_states, prompt_actions, prompt_rewards, prompt_dones, prompt_returns_to_go, prompt_timesteps, prompt_attention_mask = prompt
+            prompt_seq_length = prompt_states.shape[1]
+            prompt_state_embeddings = self.prompt_embed_state(prompt_states)
+            prompt_action_embeddings = self.prompt_embed_action(prompt_actions.type(torch.long).squeeze(-1))
+            if prompt_returns_to_go.shape[1] % 10 == 1:
+                prompt_returns_embeddings = self.prompt_embed_return(prompt_returns_to_go[:, :-1])
+            else:
+                prompt_returns_embeddings = self.prompt_embed_return(prompt_returns_to_go)
+            prompt_time_embeddings = self.prompt_embed_timestep(prompt_timesteps)
 
-            mode_stacked_inputs = torch.stack(
-                (mode_embeddings, mode_embeddings, mode_embeddings), dim=1
-            ).permute(0, 2, 1, 3).reshape(mode_variable.shape[0], 3 * mode_seq_length, self.hidden_size)
+            prompt_state_embeddings = prompt_state_embeddings + prompt_time_embeddings
+            prompt_action_embeddings = prompt_action_embeddings + prompt_time_embeddings
+            prompt_returns_embeddings = prompt_returns_embeddings + prompt_time_embeddings
+
+            prompt_stacked_inputs = torch.stack(
+                (prompt_returns_embeddings, prompt_state_embeddings, prompt_action_embeddings), dim=1
+            ).permute(0, 2, 1, 3).reshape(prompt_states.shape[0], 3 * prompt_seq_length, self.hidden_size)
 
             # to make the attention mask fit the stacked inputs, have to stack it as well
-            mode_stacked_attention_mask = torch.stack(
-                (mode_attention_mask, mode_attention_mask, mode_attention_mask), dim=1
-            ).permute(0, 2, 1).reshape(mode_variable.shape[0], 3 * mode_seq_length)
+            prompt_stacked_attention_mask = torch.stack(
+                (prompt_attention_mask, prompt_attention_mask, prompt_attention_mask), dim=1
+            ).permute(0, 2, 1).reshape(prompt_states.shape[0], 3 * prompt_seq_length)
 
             # stacked_inputs add prompted sequence
-            if mode_stacked_inputs.shape[1] == 3 * seq_length: # if only smaple one prompt
-                mode_stacked_inputs = mode_stacked_inputs.reshape(1, -1, self.hidden_size)
-                mode_stacked_attention_mask = mode_stacked_attention_mask.reshape(1, -1)
-                stacked_inputs = torch.cat((mode_stacked_inputs.repeat(batch_size, 1, 1), stacked_inputs), dim=1)
-                stacked_attention_mask = torch.cat((mode_stacked_attention_mask.repeat(batch_size, 1), stacked_attention_mask), dim=1)
-            else: # if sample one prompt for each traj in batch
-                stacked_inputs = torch.cat((mode_stacked_inputs, stacked_inputs), dim=1)
-                stacked_attention_mask = torch.cat((mode_stacked_attention_mask, stacked_attention_mask), dim=1)
+            if prompt_stacked_inputs.shape[1] == 3 * seq_length:  # if only smaple one prompt
+                prompt_stacked_inputs = prompt_stacked_inputs.reshape(1, -1, self.hidden_size)
+                prompt_stacked_attention_mask = prompt_stacked_attention_mask.reshape(1, -1)
+                stacked_inputs = torch.cat((prompt_stacked_inputs.repeat(batch_size, 1, 1), stacked_inputs), dim=1)
+                stacked_attention_mask = torch.cat(
+                    (prompt_stacked_attention_mask.repeat(batch_size, 1), stacked_attention_mask), dim=1)
+            else:  # if sample one prompt for each traj in batch
+                stacked_inputs = torch.cat((prompt_stacked_inputs, stacked_inputs), dim=1)
+                stacked_attention_mask = torch.cat((prompt_stacked_attention_mask, stacked_attention_mask), dim=1)
         # we feed in the input embeddings (not word indices as in NLP) to the model
         transformer_outputs = self.transformer(
             inputs_embeds=stacked_inputs,
@@ -110,7 +128,7 @@ class BimodalDecisionTransformer(nn.Module):
         )
         x = transformer_outputs['last_hidden_state']
 
-        if mode is None:
+        if prompt is None:
             # reshape x so that the second dimension corresponds to the original
             # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
             x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
@@ -119,9 +137,9 @@ class BimodalDecisionTransformer(nn.Module):
 
         # note here all the prompt are pre-append to x, but when return only return the last [:, -seq_length:, :] corresponding to batch data
         # get predictions
-        return_preds = self.predict_return(x[:,2])[:, -seq_length:, :]  # predict next return given state and action
-        state_preds = self.predict_state(x[:,2])[:, -seq_length:, :]    # predict next state given state and action
-        action_preds = self.predict_action(x[:,1])[:, -seq_length:, :]  # predict next action given state
+        return_preds = self.predict_return(x[:, 2])[:, -seq_length:, :]  # predict next return given state and action
+        state_preds = self.predict_state(x[:, 2])[:, -seq_length:, :]  # predict next state given state and action
+        action_preds = self.predict_action(x[:, 1])[:, -seq_length:, :]  # predict next action given state
 
         return state_preds, action_preds, return_preds
 
@@ -134,26 +152,29 @@ class BimodalDecisionTransformer(nn.Module):
         timesteps = timesteps.reshape(1, -1)
 
         if self.max_length is not None:
-            states = states[:,-self.max_length:]
-            actions = actions[:,-self.max_length:]
-            returns_to_go = returns_to_go[:,-self.max_length:]
-            timesteps = timesteps[:,-self.max_length:]
+            states = states[:, -self.max_length:]
+            actions = actions[:, -self.max_length:]
+            returns_to_go = returns_to_go[:, -self.max_length:]
+            timesteps = timesteps[:, -self.max_length:]
 
             # pad all tokens to sequence length
-            attention_mask = torch.cat([torch.zeros(self.max_length-states.shape[1]), torch.ones(states.shape[1])])
+            attention_mask = torch.cat([torch.zeros(self.max_length - states.shape[1]), torch.ones(states.shape[1])])
             attention_mask = attention_mask.to(dtype=torch.long, device=states.device).reshape(1, -1)
             states = torch.cat(
-                [torch.zeros((states.shape[0], self.max_length-states.shape[1], self.state_dim), device=states.device), states],
+                [torch.zeros((states.shape[0], self.max_length - states.shape[1], self.state_dim),
+                             device=states.device), states],
                 dim=1).to(dtype=torch.float32)
             actions = torch.cat(
                 [torch.zeros((actions.shape[0], self.max_length - actions.shape[1], 1),
                              device=actions.device), actions],
                 dim=1).to(dtype=torch.float32)
             returns_to_go = torch.cat(
-                [torch.zeros((returns_to_go.shape[0], self.max_length-returns_to_go.shape[1], 1), device=returns_to_go.device), returns_to_go],
+                [torch.zeros((returns_to_go.shape[0], self.max_length - returns_to_go.shape[1], 1),
+                             device=returns_to_go.device), returns_to_go],
                 dim=1).to(dtype=torch.float32)
             timesteps = torch.cat(
-                [torch.zeros((timesteps.shape[0], self.max_length-timesteps.shape[1]), device=timesteps.device), timesteps],
+                [torch.zeros((timesteps.shape[0], self.max_length - timesteps.shape[1]), device=timesteps.device),
+                 timesteps],
                 dim=1
             ).to(dtype=torch.long)
         else:
@@ -162,7 +183,6 @@ class BimodalDecisionTransformer(nn.Module):
         # Note: prompt within kwargs
         _, action_preds, return_preds = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
-
 
         # pluck the logits at the final step and scale by temperature
         temperature = 1.0

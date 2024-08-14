@@ -18,7 +18,9 @@ def make_dataset(path):
     trajectories['reward_to_go'] = torch.flatten(torch.Tensor(trajectories['reward_to_go']), start_dim=0)
     trajectories['dones'] = torch.flatten(torch.Tensor(trajectories['dones']), start_dim=0)
 
-    indexes = np.where(np.array(trajectories['dones']) == 1)[0]
+    indexes = np.where(np.array(trajectories['dones']) == 1)[0][:]
+    print(len(np.where(np.array(trajectories['dones']) == 1)[0]))
+    # exit(0)
     previous = 0
     trajectories_list = []
     for i in indexes:
@@ -37,7 +39,7 @@ def make_dataset(path):
 def make_bimodal_dataset(mode_list):
     trajectories_list = []
     for mode in mode_list:
-        dataset_path = f"/home/sara/repositories/player_model_dt/data/restricted_double_goal_mode_{mode}_image_ft_0_nsteps_100000_ppo_num_episodes100000_eps_0_gamma_0.99_dr_False.npz"
+        dataset_path = f"/home/sara/repositories/player_model_dt/data/official_implementation_datasets/restricted_double_goal_mode_{mode}_image_ft_0_nsteps_100000_ppo_num_episodes100000_eps_0_gamma_0.99_dr_False.npz"
         trajectories = make_dataset(dataset_path)
 
         trajectories_list.append(trajectories)
@@ -94,6 +96,7 @@ def gen_env(env_mode):
             mode=env_mode, agent_start_pos=None, max_steps=50, agent_pov=9
         )
     )
+
     return env
 
 
@@ -141,7 +144,6 @@ def get_batch(trajectories, info, variant, env_id, mode_trajectories=True):
     max_ep_len, state_mean, state_std, scale = info['max_ep_len'], info['state_mean'], info['state_std'], info['scale']
     state_dim, act_dim, device = info['state_dim'], info['act_dim'], info['device']
     batch_size, K, prompt_len = variant['per_env_batch_size'], variant['K'], variant['prompt_length']
-
     def fn(batch_size=batch_size, max_len=K):
         batch_inds = np.random.choice(
             np.arange(num_trajectories),

@@ -176,7 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_iters', type=int, default=50)
     parser.add_argument('--num_steps_per_iter', type=int, default=100)
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--log_to_wandb', '-w', type=bool, default=True)
+    parser.add_argument('--log_to_wandb', '-w', type=bool, default=False)
     parser.add_argument('--train_eval_interval', type=int, default=5)
     parser.add_argument('--test_eval_interval', type=int, default=100)
     parser.add_argument('--save-interval', type=int, default=500)
