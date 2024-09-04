@@ -39,11 +39,11 @@ def train():
 
     optimizer = torch.optim.Adam(gp_aa_model.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
 
-    data = get_dataset("/home/sara/repositories/player_model_dt/VAE/atari/dataset_incentives_bonusonly_taskrequirements_timeonly_924episodes.hdf5")
+    data = get_dataset("/home/sara/repositories/player_model_dt/VAE/atari/dataset_mturk_email_560_episodes.hdf5")
 
-    state_traj, action_traj = get_trajectory(config['env_name'], config['traj_length'], dataset=data, random_start=True)
+    state_traj, action_traj, _ = get_trajectory(config['env_name'], config['traj_length'], dataset=data, random_start=True)
     print(len(action_traj))
-    state_traj, action_traj = torch.FloatTensor(state_traj[:40000]), torch.FloatTensor(action_traj[:40000])
+    state_traj, action_traj = torch.FloatTensor(state_traj), torch.FloatTensor(action_traj)
     print("done!")
 
     # Clustering trajectories

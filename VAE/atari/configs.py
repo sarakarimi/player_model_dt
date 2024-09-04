@@ -3,9 +3,9 @@ config = {
     'seed': 0,
     'reg': 0.1,
     'tanh': True,
-    'traj_length': 10,  # for Procgen 5
+    'traj_length': 10,
     'batch_size': 50,
-    'latent_dim': 8,
+    'latent_dim': 2, # 8,
     'latent_reg': 0.1,
     'hidden_dims': [200, 200],
     'num_eval': 500,
@@ -14,5 +14,3 @@ config = {
     'goal_idxs': None,
     'render': True,
 }
-
-PATH_TO_AE_MODEL = "../models/AE_models/" + config['env_name'] + "-opal/600.pt"

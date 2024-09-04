@@ -2,7 +2,7 @@ import gym
 import numpy as np
 import h5py
 from tqdm import tqdm
-
+import random
 
 def get_keys(h5file):
     keys = []
@@ -26,8 +26,9 @@ def get_dataset(h5path):
     return data_dict
 
 
+
 def get_trajectory(env_name, traj_len, dataset=None, random_start=False):
-    list_of_states, list_of_actions = [], []
+    list_of_states, list_of_actions, list_of_tasks = [], [], []
     if dataset is None:
         env = gym.make(env_name)
         dataset = env.get_dataset()
@@ -36,6 +37,8 @@ def get_trajectory(env_name, traj_len, dataset=None, random_start=False):
         print(dataset_len)
         list_of_states = [dataset['observations'][i:i + traj_len] for i in range(0, dataset_len, traj_len)]
         list_of_actions = [dataset['actions'][i:i + traj_len] for i in range(0, dataset_len, traj_len)]
+        list_of_tasks = [dataset['tasks'][i:i + traj_len] for i in range(0, dataset_len, traj_len)]
+
     else:
         num_samples = len(dataset['observations'])
         print(num_samples)
@@ -43,7 +46,13 @@ def get_trajectory(env_name, traj_len, dataset=None, random_start=False):
         start_indexes = np.random.randint(0, num_samples - traj_len - 1, size=number_of_traj)
         list_of_states = [dataset['observations'][i:i + traj_len] for i in start_indexes]
         list_of_actions = [dataset['actions'][i:i + traj_len] for i in start_indexes]
-    return list_of_states, list_of_actions
+        list_of_tasks = [dataset['tasks'][i:i + traj_len] for i in start_indexes]
+
+
+    c = list(zip(list_of_states, list_of_actions, list_of_tasks))
+    random.shuffle(c)
+    list_of_states, list_of_actions, list_of_tasks = zip(*c)
+    return list_of_states, list_of_actions, list_of_tasks
 
 
 if __name__ == '__main__':

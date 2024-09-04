@@ -1,4 +1,4 @@
-from . import double_goal_minigrid, empty_treasure_enemy, minigrid_dungeon
+from . import double_goal_minigrid, base_level_mgs
 
 
-__all__ = ["empty_treasure_enemy", "double_goal_minigrid", "minigrid_dungeon"]
+__all__ = ["base_level_mgs", "double_goal_minigrid"]
