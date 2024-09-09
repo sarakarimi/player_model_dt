@@ -39,7 +39,7 @@ def train():
 
     optimizer = torch.optim.Adam(gp_aa_model.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
 
-    data = get_dataset("/home/sara/repositories/player_model_dt/VAE/atari/dataset_mturk_email_560_episodes.hdf5")
+    data = get_dataset(config['dataset_path'])
 
     state_traj, action_traj, _ = get_trajectory(config['env_name'], config['traj_length'], dataset=data, random_start=True)
     print(len(action_traj))
@@ -91,10 +91,6 @@ def train():
         # summary_writer.add_scalar("avg KL loss", avg_kl_loss, epoch_num)
         # summary_writer.add_scalar("avg NLL loss", avg_nll_loss, epoch_num)
 
-        # if epoch_num % config['eval_interval'] == 0:
-        #     # render_env = gym.wrappers.Monitor(env, os.path.join("no_train", f'epoch_num_{epoch_num}'),
-        #     #                                   video_callable=lambda episode_id: is_render)
-        #     play_policy(env, gp_aa_model, config['num_eval'], config['traj_length'], config['tanh'], is_cuda)
         path = os.path.join("models/", config["env_name"] + f'-{epoch_num}.pt')
         if epoch_num % 50 == 0:
             save_dict = {'gp_aa_model': gp_aa_model.state_dict(), 'opt': optimizer.state_dict()}
