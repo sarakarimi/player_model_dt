@@ -1,8 +1,8 @@
-from typing import Tuple
+from typing import Tuple, Any
 import gymnasium as gym
 import pygame
 from gymnasium import spaces
-from metalgridsolid.core.map import Ground, Vent, Obstacle
+from metalgridsolid.core.map import Ground, Vent, Obstacle, Goal
 import numpy as np
 from metalgridsolid.core.enemy import Enemy
 from metalgridsolid.core.agent import Agent
@@ -40,19 +40,27 @@ class MetalGridSolidEnv(gym.Env):
                  items: Tuple[Item] | None = None,
                  obstacles: Tuple[Tuple[int, int]] = None,
                  rw_weights: dict[str, float] = None,
-                 observation_mode: str = 'image',
-                 max_steps: int = 100):
+                 observation_mode: str = 'features',
+                 max_steps: int = 100,
+                 render_mode: str | None = "array"):
         
         super(MetalGridSolidEnv, self).__init__()
 
-        # Initialize pygame
+        # Setup visualization
+        self.observation_mode = observation_mode
         self.window_size = 600
         self.grid_size = grid_size
         self.width, self.height = grid_size
         self.cell_size = self.window_size // self.width
-        pygame.init()
-        self.screen = pygame.display.set_mode((self.window_size, self.window_size))
-        pygame.display.set_caption("Metal Grid Solid")
+        self.render_mode = render_mode
+        self.render_size = None
+        self.window = None
+        self.clock = None
+        if self.render_mode is None:
+            self.render_mode = "array"
+        if self.render_mode == 'human':
+            assert self.observation_mode == 'image', "Human rendering mode is only supported for image-based observation mode!"
+
 
         # Setup Ground
         self.walls = walls if walls else []
@@ -75,7 +83,7 @@ class MetalGridSolidEnv(gym.Env):
         self.items = items
 
         # Setup Goal
-        self.goal = goal
+        self.goal = Goal(position=goal)
 
         # Setup Enemies
         self.enemies = enemies
@@ -87,9 +95,6 @@ class MetalGridSolidEnv(gym.Env):
             'takedown': 0.0,        # No weight for enemies killed
             'camouflage': 0.0        # No weight for using the item
         } if rw_weights is None else rw_weights
-
-        # To manage game clock
-        self.clock = pygame.time.Clock()
 
         # Setup Gym
         self.max_number_of_steps = max_steps
@@ -136,14 +141,35 @@ class MetalGridSolidEnv(gym.Env):
                              obstacle=self.obstacles.position,
                              map=[self.height, self.width])
         
+        # Define action space
+        self.action_space = spaces.Discrete(6)  # 0: Rotate Left, 1: Rotate Right, 2: Move Forward, 3: Pick Up, 4: Drop Down, 5: Attack
+
+        # Create Environment State
+        self.env_state = EnvState(agent=self.agent,
+                             enemies=self.enemies,
+                             items=self.items,
+                             ground=self.ground.position,
+                             vents=self.vents.position,
+                             obstacle=self.obstacles.position,
+                             map=[self.height, self.width])
+        
+
         # Create Logger
         self.logger = Logger()
 
-        # Cache the feature observation for the static-elements
+        # Cache the feature observation for the static-elements # TODO: FIX THIS
         self.static_ft_obs = self._generate_static_ft_obs()
+        self.static_obs = self._generate_static_image_obs()
 
     
-    def reset(self):
+    def reset(self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[np.array, dict[str, Any]]:
+        
+        super().reset(seed=seed)
+
         # Reset logger
         self.logger.reset()
 
@@ -161,7 +187,11 @@ class MetalGridSolidEnv(gym.Env):
                              vents=self.vents.position,
                              obstacle=self.obstacles.position,
                              map=[self.height, self.width])
-        return self._get_obs()
+
+        if self.render_mode == "human":
+            self.render()
+
+        return self._get_obs(), {}
     
     def _generate_static_ft_obs(self):
         # Initialize the observation with empty tiles (OBJECT_IDX = 0, DIRECTION = -1, STATE = -1)
@@ -182,6 +212,45 @@ class MetalGridSolidEnv(gym.Env):
             obs[x, y, 0] = EnvID.OBSTACLE
         
         return obs
+
+    def _generate_static_image_obs(self):
+        
+        width_px = self.width * self.cell_size
+        height_px = self.height * self.cell_size
+
+        # Create an empty image with grey background
+        img = np.full((height_px, width_px, 3), np.array([99, 99, 99], dtype=np.uint8), dtype=np.uint8)
+
+        # Render the map 
+        self.ground.render(img, self.cell_size)
+        self.vents.render(img, self.cell_size)
+        self.obstacles.render(img, self.cell_size)
+        self.goal.render(img, self.cell_size)
+
+        # Add grid lines
+        line_color = np.array(Color.GREY, dtype=np.uint8)
+        line_thickness = 1  # 1 pixel thickness for thin lines
+
+        for x in range(0, width_px, self.cell_size):
+            img[:, x:x + line_thickness] = line_color  # Vertical lines
+
+        for y in range(0, height_px, self.cell_size):
+            img[y:y + line_thickness, :] = line_color  # Horizontal lines
+
+        # Add the border around the full window
+        border_color = np.array(Color.WHITE, dtype=np.uint8)
+        border_thickness = 15  # 15 pixels thickness for the border
+
+        # Top border
+        img[:border_thickness, :] = border_color
+        # Bottom border
+        img[-border_thickness:, :] = border_color
+        # Left border
+        img[:, :border_thickness] = border_color
+        # Right border
+        img[:, -border_thickness:] = border_color
+        
+        return img
 
     def _generate_ground(self) -> list[Ground]:
         # Create a grid initialized to False (non-walkable)
@@ -223,7 +292,7 @@ class MetalGridSolidEnv(gym.Env):
                     return np.array([row, col])
         raise ValueError("No valid starting position found in the walkable area!")
     
-    def _get_feature_obs(self):
+    def _get_feature_obs(self) -> np.ndarray:
 
         obs = np.copy(self.static_ft_obs)
 
@@ -244,29 +313,26 @@ class MetalGridSolidEnv(gym.Env):
         for item in self.items:
             item_x, item_y = item.position
             obs[item_x, item_y, 0] = EnvID.CAMOUFLAGE if item.item_type == 'camouflage' else NotImplemented
-
         return obs
     
-    def _get_image_obs(self):
-        # Render the current state of the environment
-        self.render()  # Ensure the rendering is up to date
+    def _get_image_obs(self) -> np.ndarray:
 
-        # Capture the image from the screen
-        image = pygame.surfarray.array3d(self.screen)
-        image = np.transpose(image, (1, 0, 2))  # Convert from (width, height, channels) to (height, width, channels)
+        img = np.copy(self.static_obs)
 
-        # Convert the numpy array to a PIL image
-        # image = Image.fromarray(image)
+        # Render the agent
+        self.agent.render(img, self.cell_size)
 
-        # # Resize the image to the specified size (64x64)
-        # image = image.resize((84,84), Image.ANTIALIAS)
-
-        # # Save the resized image to a file
-        # image.save(f'env_image{self.logger.steps_taken}.png')
+        # Render the enemies
+        for enemy in self.enemies:
+            enemy.render(img, self.cell_size)
         
-        return image
+        # Render the items
+        for item in self.items:
+            item.render(img, self.cell_size)
+        
+        return img
     
-    def _get_obs(self):
+    def _get_obs(self) -> np.ndarray:
         if self.observation_mode == 'features':
             return self._get_feature_obs()
         elif self.observation_mode == 'image':
@@ -323,48 +389,41 @@ class MetalGridSolidEnv(gym.Env):
 
 
     def _check_goal(self):
-        return True if np.array_equal(self.agent.position, self.goal) else False
+        return True if np.array_equal(self.agent.position, self.goal.position) else False
 
 
-    def render(self, mode="human"):
-        self.screen.fill(Color.GREY)
+    def render(self):
 
-        # Draw ground
-        self.ground.render(self.screen, self.cell_size)
+        # Get observation
+        obs = self._get_obs()
 
-        # Draw vents
-        self.vents.render(self.screen, self.cell_size)
+        if self.render_mode == "human":
+            obs = np.transpose(obs, axes=(1, 0, 2))
+            if self.render_size is None:
+                self.render_size = obs.shape[:2]
+            if self.window is None:
+                pygame.init()
+                pygame.display.init()
+                self.window = pygame.display.set_mode(
+                    (self.window_size, self.window_size)
+                )
+                pygame.display.set_caption("Metal Grid Solid")
+            if self.clock is None:
+                self.clock = pygame.time.Clock()
+            surf = pygame.surfarray.make_surface(obs)
 
-        # Draw obstacles
-        self.obstacles.render(self.screen, self.cell_size)
+            # Blit the surface onto the Pygame window
+            self.window.blit(surf, (0, 0))
 
-        # Draw goal
-        pygame.draw.rect(self.screen, Color.GREEN, (self.goal[1] * self.cell_size, self.goal[0] * self.cell_size, self.cell_size, self.cell_size))
+            # Update the display
+            pygame.display.flip()
 
-        # Draw agent
-        self.agent.render(self.screen, self.cell_size)
+            # Maintain the frame rate
+            self.clock.tick(60)  # Assuming you want to run at 60 FPS
 
-        # Draw enemies
-        for enemy in self.enemies:
-            enemy.render(self.screen, self.cell_size)
-
-        # Draw items
-        for item in self.items:
-            item.render(self.screen, self.cell_size)
-        
-        # Draw grid lines using lines instead of rect borders
-        line_color = Color.GREY
-        line_thickness = 1  # 1 pixel thickness for thin lines
-
-        for x in range(0, self.window_size, self.cell_size):
-            pygame.draw.line(self.screen, line_color, (x, 0), (x, self.window_size), line_thickness)
-        for y in range(0, self.window_size, self.cell_size):
-            pygame.draw.line(self.screen, line_color, (0, y), (self.window_size, y), line_thickness)
-        
-        # Draw the border around the full window
-        window_rect = pygame.Rect(0, 0, self.window_size, self.window_size)
-        pygame.draw.rect(self.screen, Color.WHITE, window_rect, 15)
-
-        pygame.display.flip()
+        elif self.render_mode == "array":
+            return obs
+        else:
+            NotImplementedError("Unknown render mode")
 
     

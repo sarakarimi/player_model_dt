@@ -1,5 +1,5 @@
-import pygame
-
+import time
+import numpy as np
 from metalgridsolid.core.item import Camouflage
 from metalgridsolid.environment import MetalGridSolidEnv
 from metalgridsolid.core.enemy import PatrollingEnemy, StandingEnemy
@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
 
     # Define agent
-    agent = Agent(position=(2, 8), direction=2)
+    agent = Agent(position=(1, 1), direction=2)
 
     # Define enemies
     enemies = [PatrollingEnemy(position=(3, 1), direction=1),
@@ -63,13 +63,16 @@ if __name__ == "__main__":
         'goal': 1.0,            # Standard weight for reaching the goal
         'takedown': 0.0,        # No weight for enemies killed
         'camouflage': 0.0       # No weight for using the camouflage
-}
-    # Define observation type
-    obs_type = 'features' # Or image
+}   
+    # Define max steps of the environment
+    max_steps = 100
 
-    # Define number of maxiumum steps per episode
-    max_steps = 10
+    # Setup visualization
+    observation_mode = 'features' # Image or features
+    render_mode = 'array' # Array or human (for rendering)
 
+
+    # Create the environment
     env = MetalGridSolidEnv(agent=agent,
                             enemies=enemies,
                             vents=[vent_l, vent_r],
@@ -79,37 +82,29 @@ if __name__ == "__main__":
                             obstacles=obstacles,
                             goal=goal,
                             rw_weights=rw_weights,
-                            observation_mode=obs_type,
+                            observation_mode=observation_mode,
+                            render_mode=render_mode,
                             max_steps=max_steps)
-    obs = env.reset()
+    obs, _ = env.reset()
+    done = False
 
-    finish = False
-    while not finish:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                done = True
-                break
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_x:
-                    action = 0  # No OP
-                if event.key == pygame.K_LEFT:
-                    action = 1  # Rotate Left
-                elif event.key == pygame.K_RIGHT:
-                    action = 2  # Rotate Right
-                elif event.key == pygame.K_UP:
-                    action = 3  # Move Forward
-                elif event.key == pygame.K_SPACE:
-                    action = 4  # Pick Up
-                elif event.key == pygame.K_DOWN:
-                    action = 5  # Drop Down
-                elif event.key == pygame.K_z:
-                    action = 6  # Attack
-                else:
-                    action = None
+    # Benchmarking loop
+    steps = 0
+    total_reward = 0
 
-                if action is not None:
-                    obs, reward, done, truncated, info = env.step(action)
-                    finish = done or truncated
+    start_time = time.time()
+    while not steps >= max_steps:
+        action = np.random.choice(env.action_space.n)  # Choose a random action
+        obs, reward, done, truncated, info = env.step(action)
+        total_reward += reward
+        steps += 1
+        if done or truncated:
+            env.reset()
+    end_time = time.time()
 
-        env.render()
-        env.clock.tick(10)
+    # Calculate steps per second
+    elapsed_time = end_time - start_time
+    steps_per_second = steps / elapsed_time
+
+    print(f"Elapsed time: {elapsed_time:.4f} seconds.")
+    print(f"Steps per second: {steps_per_second:.2f} steps/second.")

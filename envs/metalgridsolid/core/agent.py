@@ -30,7 +30,7 @@ class Agent(Entity):
         self.item = None
 
     def render(self, screen: Any, cell_size: int) -> None:
-        draw_triangle(self.position, self.direction, self.color, screen, cell_size)
+        draw_triangle(self.position, self.direction, self.color, screen, cell_size, scale=0.6) 
 
     def step(self, action: int, env_state: Any, logger: Logger) -> None:
         # Rotate the agent
@@ -56,14 +56,12 @@ class Agent(Entity):
                     self.state = item.pickup()
                     self.set_color()
                     self.item = item
-                    print(f"Agent picked up {item.item_type}!")
                     break
 
         elif action == AgentAction.DROP_DOWN:  # Drop Down
             if self.item is not None:
                 drop_position = self.position + DIRECTIONS[self.direction]
                 if check_valid_position(drop_position, env_state, agent_check=True):
-                    print(f"{self.item.item_type} dropped!")
                     logger.log_item_dropped(self.item.item_type)
                     for item in env_state.items:
                         if np.array_equal(item.item_type, self.item.item_type) and item.is_picked_up == True:
@@ -87,5 +85,4 @@ class Agent(Entity):
                 if np.array_equal(self.position, enemy_back_position) and np.array_equal(attack_position, enemy_position):
                     enemy.set_state(EnemyState.DEAD)
                     logger.log_enemy_killed()
-                    print("Enemy killed!")
                     break

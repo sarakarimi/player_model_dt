@@ -53,6 +53,12 @@ class Camouflage(Item):
         self.position = position
         return AgentState.HIDDEN
     
-    def render(self, screen: Any, cell_size: int) -> None:
+    def render(self, img: Any, cell_size: int) -> None:
         if not self.is_picked_up:
-            pygame.draw.rect(screen, self.color, (self.position[1] * cell_size, self.position[0] * cell_size, cell_size, cell_size))
+            start_y = self.position[0] * cell_size
+            start_x = self.position[1] * cell_size
+            end_y = start_y + cell_size
+            end_x = start_x + cell_size
+        
+            # Fill the corresponding area in the image array with the vent's color
+            img[start_y:end_y, start_x:end_x] = self.color

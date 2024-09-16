@@ -76,9 +76,9 @@ class Enemy(Entity):
 
         return False
     
-    def render(self, screen: Any, cell_size: int) -> None:
-         if self.state != EnemyState.DEAD:
-            draw_triangle(self.position, self.direction, self.color, screen, cell_size)
+    def render(self, img: Any, cell_size: int) -> None:
+        if self.state != EnemyState.DEAD:
+            draw_triangle(self.position, self.direction, self.color, img, cell_size)
     
 
 class PatrollingEnemy(Enemy):
