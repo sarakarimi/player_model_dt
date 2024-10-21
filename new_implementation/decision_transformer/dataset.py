@@ -65,6 +65,9 @@ class TrajectoryDataset(Dataset):
     def load_trajectories(self) -> None:
         merge_observations, merge_actions, merge_rewards, merge_dones, merge_truncated, merge_infos, merge_modes, merge_timesteps = [], [], [], [], [], [], [], []
 
+        # used only for DEC-VAE experiments
+        obs, acts, tasks = [], [], []
+
         # Iterating over many dataset with different environment modes or play styles
         for i, path in enumerate(self.trajectory_paths):
             traj_reader = TrajectoryReader(path)
@@ -99,10 +102,10 @@ class TrajectoryDataset(Dataset):
                     "Observations are not flat or images, check the shape of the observations: ",
                     observations.shape,
                 )
-
+            # TODO change the format back for DT
             if self.observation_type != "flat":
                 t_observations = rearrange(
-                    torch.tensor(observations), "t b h w c -> (b t) h w c"
+                    torch.tensor(observations), "t b h w c -> (b t) (h w c)" #"t b h w c -> (b t) h w c"
                 )
             else:
                 t_observations = rearrange(
@@ -126,7 +129,7 @@ class TrajectoryDataset(Dataset):
             self.returns = [r.sum() for r in self.rewards]
             self.returns = ['%.2f' % elem for elem in self.returns]
             unique, counts = np.unique(self.returns, return_counts=True)
-            print(unique, counts)
+            # print(unique, counts)
             self.timesteps = [torch.arange(len(i)) for i in self.states]
             self.traj_lens = np.array([len(i) for i in self.states])
 
@@ -145,6 +148,15 @@ class TrajectoryDataset(Dataset):
                 i for i, m in zip(self.timesteps, traj_len_mask) if m
             ]
             self.traj_lens = self.traj_lens[traj_len_mask]
+
+            # TODO move this out as it is only used only for DEC-VAE experiments
+            obs.extend(self.states[:])
+            acts.extend(self.actions[:])
+            tasks.extend(np.ones(len(self.actions[:])) * i)# self.modes[:50])
+            self.obs = obs
+            self.acts = acts
+            self.tasks = tasks
+
 
             self.num_timesteps = sum(self.traj_lens)
             self.num_trajectories = len(self.states)
@@ -185,6 +197,7 @@ class TrajectoryDataset(Dataset):
         self.modes = merge_modes
         self.returns = merge_rewards
         self.timesteps = merge_timesteps
+
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
         num_timesteps = max(int(pct_traj * self.num_timesteps), 1)
@@ -482,5 +495,8 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
 
 
 if __name__ == '__main__':
-    path = "/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_01_trajectories_mode2.gz"
-    trajectory_data_set = TrajectoryDataset(trajectory_paths=[path])
+    paths = ["/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode1.gz",
+             "/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode2.gz"
+             ]
+    trajectory_data_set = TrajectoryDataset(trajectory_paths=paths)
+    print(trajectory_data_set.tasks)

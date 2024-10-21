@@ -4,6 +4,7 @@ import h5py
 from tqdm import tqdm
 import random
 
+
 def get_keys(h5file):
     keys = []
 
@@ -56,5 +57,7 @@ def get_trajectory(env_name, traj_len, dataset=None, random_start=False):
 
 
 if __name__ == '__main__':
-    data = get_dataset("/home/sara/repositories/player_model_dt/VAE/atari/dataset.hdf5")
-    print(len(data['actions']))
+    h5path = "/home/sara/repositories/player_model_dt/VAE/atari/datasets/dataset_competitive_ai_human_383_episodes.hdf5"
+    data = get_dataset(h5path)
+    with h5py.File(h5path, 'r') as dataset_file:
+        print([len(i) for i in dataset_file["observations"]])

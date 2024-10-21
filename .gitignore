@@ -30,3 +30,5 @@ player_model_dt.egg-info/dependency_links.txt
 player_model_dt.egg-info/PKG-INFO
 player_model_dt.egg-info/SOURCES.txt
 player_model_dt.egg-info/top_level.txt
+trajectory_embedding/atari/style_dec_vae/model
+trajectory_embedding/atari/style_dec_vae/output

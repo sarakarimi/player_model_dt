@@ -1,8 +1,8 @@
 import ale_py.env.gym
 import gym
 from matplotlib import pyplot as plt
-from skill_network import *
-from configs import *
+from VAE.atari.skill_vae_with_learnt_prior.skill_network import *
+from VAE.atari.skill_vae_with_learnt_prior.configs import *
 import numpy
 
 
@@ -46,13 +46,11 @@ def play_policy(env, model, num_eval, traj_length, tanh, render=False, encode_st
         num_steps = 0
         while not done:
             latent, _ = model.prior.act(latent=None, state=state, encode_state=True)
-            print(latent)
             if tanh:
                 latent = torch.tanh(latent)
             for t in range(traj_length):
                 action, _ = model.decoder.act(latent, state, encode_state=True)
                 action = action.cpu().numpy().flatten()
-                print(action)
                 s, r, terminated, truncated, info = env.step(action[0])
                 done = terminated or truncated
                 reward += r
@@ -64,6 +62,7 @@ def play_policy(env, model, num_eval, traj_length, tanh, render=False, encode_st
                 #     rewards.append(reward)
                 #     break
         print(reward)
+        print(num_steps)
         rewards.append(reward)
     print(numpy.mean(rewards))
     return rewards
@@ -87,5 +86,5 @@ if __name__ == '__main__':
     env = AtariPreprocessing(env)
     print(env.action_space, env.observation_space)
 
-    model = load_ae_model(env, "/home/sara/repositories/player_model_dt/VAE/atari/models/incentives_dataset_model/atari-100.pt")
+    model = load_ae_model(env, "/VAE/atari/models/human_ai_383_dataset_model_latent_size_2_traj_len_28/atari-200.pt")
     play_policy(env, model, config['num_eval'], config['traj_length'], config['tanh'])
