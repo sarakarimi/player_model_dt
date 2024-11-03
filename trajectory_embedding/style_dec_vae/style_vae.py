@@ -1,13 +1,11 @@
-import itertools
 
+from tqdm import tqdm
 import torch
 import torch.nn as nn
-from tqdm import tqdm
-from torch.utils.data import DataLoader
 
-from trajectory_embedding.atari.style_dec_vae.utils.loss import MiniGridLoss
-from trajectory_embedding.atari.style_dec_vae.utils.utils import convert_to_one_hot
-from utils.dataset import *
+from trajectory_embedding.style_dec_vae.utils.dataset import MiniGridDataset, collate_fn
+from trajectory_embedding.style_dec_vae.utils.loss import MiniGridLoss
+from trajectory_embedding.style_dec_vae.utils.utils import convert_to_one_hot
 from torch.autograd import Variable
 
 
@@ -76,6 +74,7 @@ class ConvEncoder(nn.Module):
     def forward(self, inp):
         return self.network(inp)
 
+
 # ----------------------------------------------------
 
 class Stochastic(nn.Module):
@@ -105,6 +104,7 @@ class GaussianSampling(Stochastic):
 
         return z, mu, log_var
 
+
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, latent_size, device, num_layers=1):
         super(Encoder, self).__init__()
@@ -131,19 +131,17 @@ class Encoder(nn.Module):
         z = mu + noise * std
         return z, mu, logvar
 
-    def forward(self, x, seq_lens):
+    def forward(self, x, seq_lens, hidden_enc):
         # Pack the padded sequence
         packed_input = nn.utils.rnn.pack_padded_sequence(x, seq_lens, batch_first=True, enforce_sorted=False)
-        outputs, (hidden, cell) = self.lstm(packed_input)
-        enc_h = hidden[-1]  # .view(batch_size, self.hidden_size).to(self.device)
+        outputs, hidden_enc = self.lstm(packed_input, hidden_enc)
+        enc_h = hidden_enc[0][-1]  # .view(batch_size, self.hidden_size).to(self.device)
 
         # extract latent variable z(hidden space to latent space)
-        # mean = self.fc21(enc_h)
-        # logvar = self.fc22(enc_h)
-        # z, _, _ = self.reparametize(mean, logvar)  # batch_size x latent_size
+
         z, mean, logvar = self.sampling(enc_h)
 
-        return z, mean, logvar, (hidden, cell)
+        return z, mean, logvar, hidden_enc
 
 
 class Decoder(nn.Module):
@@ -161,7 +159,7 @@ class Decoder(nn.Module):
             batch_first=True,
             bidirectional=False,
         )
-        # self.fc1 = nn.Linear(self.latent_size, self.hidden_size)
+        self.fc1 = nn.Linear(self.latent_size, self.hidden_size)
         self.fc2 = nn.Linear(hidden_size, input_size)
         # self.final = nn.Sigmoid()
 
@@ -172,20 +170,20 @@ class Decoder(nn.Module):
 
         # TODO replace with the z as hidden
         # initialize hidden state as inputs
-        # h_ = self.fc1(z)
-        # hidden = (h_.contiguous(), h_.contiguous())
-        h_0 = torch.zeros(1, z.size(0), self.hidden_size).to(z.device)
-        c_0 = torch.zeros(1, z.size(0), self.hidden_size).to(z.device)
-        hidden = (h_0, c_0)
+        h_ = self.fc1(z).unsqueeze(0)
+        hidden = (h_.contiguous(), h_.contiguous())
+        # h_0 = torch.zeros(1, z.size(0), self.hidden_size).to(z.device)
+        # c_0 = torch.zeros(1, z.size(0), self.hidden_size).to(z.device)
+        # hidden = (h_0, c_0)
 
         x = torch.nn.utils.rnn.pack_padded_sequence(z_repeat, lengths, batch_first=True, enforce_sorted=False)
 
-        output, (hidden, cell) = self.lstm(x, hidden)
-        output, _ = torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True)
+        output, hidden = self.lstm(x, hidden)
+        output, _ = torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True, total_length=max_seq_len)
 
         prediction = self.fc2(output)
         # prediction = self.final(prediction)
-        return prediction, (hidden, cell)
+        return prediction, hidden
 
 
 class LSTMVAE(nn.Module):
@@ -225,9 +223,9 @@ class LSTMVAE(nn.Module):
             num_layers=self.num_layers,
         )
 
-    def forward(self, x, seq_lens):
+    def forward(self, x, seq_lens, hidden_enc):
         # encode input space to hidden space
-        z, mean, logvar, _ = self.lstm_enc(x, seq_lens)
+        z, mean, logvar, hidden_enc = self.lstm_enc(x, seq_lens, hidden_enc)
 
         # decode latent space to input space
         reconstruct_output, hidden = self.lstm_dec(z, seq_lens)
@@ -265,13 +263,13 @@ class LSTMVAE(nn.Module):
         #     recons_loss += nn.functional.binary_cross_entropy(recons[i, :length], og_input[i, :length], reduction='sum')
         # recons_loss /= len(lengths)
 
-        # per on-hot category nll loss
+        # per on-hot category costume loss
         recons_loss = 0
         for i, length in enumerate(lengths):
             recons_loss += loss_fn(recons[i, :length], og_input[i, :length])
         recons_loss /= len(lengths)
 
-        kld_loss = -0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1) / len(lengths)
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1))
 
         loss = recons_loss + kld_weight * kld_loss
         return {
@@ -283,12 +281,9 @@ class LSTMVAE(nn.Module):
 
 def train(model, train_loader, test_loader, epochs):
     # optimizer
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    optimizer = torch.optim.Adam(itertools.chain(model.encoder.parameters(),
-                                                 model.decoder.parameters()), lr=0.002)
     steplr = torch.optim.lr_scheduler.StepLR(optimizer, 10, 0.9)
-
 
     ## training
     count = 0
@@ -301,7 +296,7 @@ def train(model, train_loader, test_loader, epochs):
 
         for batch_data, labels, lengths in train_iterator:
             batch_data = batch_data.to(torch.float32).to(model.device)
-            lengths = lengths.to(torch.int64)#.to(model.device)
+            lengths = lengths.to(torch.int64)  # .to(model.device)
 
             optimizer.zero_grad()
             mloss, recon_x, info = model(batch_data, lengths)
@@ -311,6 +306,7 @@ def train(model, train_loader, test_loader, epochs):
             optimizer.step()
 
             train_iterator.set_postfix({"train_loss": float(mloss.mean())})
+    print(info)
 
     model.eval()
     eval_loss = 0
@@ -322,7 +318,6 @@ def train(model, train_loader, test_loader, epochs):
         for batch_data, labels, lengths in test_iterator:
             batch_data = batch_data.to(torch.float32).to(model.device)
             lengths = lengths.to(torch.int64)  # .to(device)
-
 
             mloss, recon_x, info = model(batch_data, lengths)
             torch.set_printoptions(linewidth=200)
@@ -343,22 +338,17 @@ if __name__ == "__main__":
     input_size = 500  # Number of features in each timestep
     hidden_size = 128  # 20
     latent_size = 10  # 8
-    num_epochs = 1000  # 10000
-    batch_size = 32
-    # max_seq_len = 4
-    # feature_size = 2
-    # num_samples = 10
+    num_epochs = 10  # 10000
+    batch_size =  1 #32
 
-    # # Fake data
-    # sequences = generate_varied_length_data(num_samples, max_seq_len, feature_size)
-    #
-    # # Create dataset and data loaders
-    # train_set = VariedLengthDataset(sequences)
-    # test_set = VariedLengthDataset(sequences)
 
-    paths = ["/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode1.gz",
-             "/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode2.gz"
-             ]
+    paths = [
+        "data/PPO_trajectories_goal0.gz",
+        "data/PPO_trajectories_goal5.gz",
+        "data/PPO_trajectories_goal6.gz",
+        "data/PPO_trajectories_goal3.gz",
+
+    ]
     trajectory_data_set = MiniGridDataset(trajectory_paths=paths)
     train_loader = torch.utils.data.DataLoader(
         dataset=trajectory_data_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
@@ -367,14 +357,6 @@ if __name__ == "__main__":
 
     # define LSTM-based VAE model
     model = LSTMVAE(input_size, hidden_size, latent_size)
-
-    # convert to format of data loader
-    # train_loader = torch.utils.data.DataLoader(
-    #     dataset=train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
-    # )
-    # test_loader = torch.utils.data.DataLoader(
-    #     dataset=test_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
-    # )
 
     # training
     if torch.cuda.is_available():

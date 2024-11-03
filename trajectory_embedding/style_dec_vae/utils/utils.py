@@ -54,18 +54,10 @@ def cluster_accuracy(predicted: np.array, target: np.array):
     return sum([w[i, j] for i, j in zip(ind_1, ind_2)]) * 1.0 / predicted.size, w
 
 
-def plot_embeddings(model, gtruth, Z, model_predictions):
-    # model.gmm.weights_ = model.pi.data.cpu().detach().numpy()
-    # model.gmm.means_ = model.mu_c.data.cpu().detach().numpy()
-    # model.gmm.covariances_ = torch.exp(model.log_sigma_c.data).cpu().detach().numpy()
-    # model.gmm.precisions_cholesky_ = _compute_precision_cholesky(model.gmm.covariances_, 'diag')
-    #
-    # predicts = model.gmm.predict(Z)
-    # print('GMM accuracy: {:0.4f}'.format(cluster_accuracy(predicts, gtruth)[0] * 100))
-
+def plot_embeddings(gtruth, Z, model_predictions):
     embedding_data = []
     for embedding, task, gtruth_task in zip(Z, model_predictions, gtruth):
-        embedding_data.append({'embeddings': embedding[0], 'tasks': task, 'task_ground_truth': gtruth_task})
+        embedding_data.append({'embeddings': embedding, 'tasks': task, 'task_ground_truth': gtruth_task})
     df = pandas.DataFrame(embedding_data)
     df = df.fillna(0)
     # print(df)

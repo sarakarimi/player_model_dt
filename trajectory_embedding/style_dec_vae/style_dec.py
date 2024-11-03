@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
 from style_vae import Decoder, Encoder
-from trajectory_embedding.atari.style_dec_vae.utils.loss import MiniGridLoss
-from utils.distributions import log_gaussian
-from sklearn.mixture import GaussianMixture
+from trajectory_embedding.style_dec_vae.utils.loss import MiniGridLoss
+from trajectory_embedding.style_dec_vae.utils.distributions import log_gaussian
 
 
 class ClusteringBasedVAE(nn.Module):
@@ -32,73 +30,72 @@ class ClusteringBasedVAE(nn.Module):
         self.alpha = alpha
 
         self.n_centroids = n_clusters
-        self.pi = nn.Parameter(torch.ones(self.n_centroids, dtype=torch.float32) / self.n_centroids)
-        self.mu_c = nn.Parameter(torch.zeros((self.n_centroids, self.latent_size), dtype=torch.float32))
-        self.log_sigma_c = nn.Parameter(torch.ones((self.n_centroids, self.latent_size), dtype=torch.float32))
-        # self.gmm = GaussianMixture(n_components=self.n_centroids, covariance_type='diag', n_init=0, max_iter=0)
 
-        if self.is_logits:
-            self.resconstruction_loss = nn.modules.loss.MSELoss()
-        else:
-            self.resconstruction_loss = self.binary_cross_entropy
-        self.loss_fn = MiniGridLoss()
+        # learnable GMM parameters initialization
+        self.pi = nn.Parameter(torch.ones(self.n_centroids, dtype=torch.float32) / self.n_centroids, requires_grad=True)
+        self.mu_c = nn.Parameter(torch.zeros((self.n_centroids, self.latent_size), dtype=torch.float32), requires_grad=True)
+        self.log_sigma_c = nn.Parameter(torch.ones((self.n_centroids, self.latent_size), dtype=torch.float32), requires_grad=True)
+
+        self.custom_loss_fn = MiniGridLoss()
 
 
-    def binary_cross_entropy(self, x, r):
-        return -torch.sum(x * torch.log(r + 1e-8) + (1 - x) * torch.log(1 - r + 1e-8), dim=-1)
-
-    def forward(self, x, seq_lens):
-        latent, z_mean, z_log_var, _ = self.encoder(x, seq_lens)
+    def forward(self, x, seq_lens,hidden_enc):
+        latent, z_mean, z_log_var, hidden_enc = self.encoder(x, seq_lens, hidden_enc)
 
         pi = self.pi
         log_sigmac_c = self.log_sigma_c
         mu_c = self.mu_c
+
         pzc = torch.exp(torch.log(pi.unsqueeze(0)) + self.gaussian_pdfs_log(latent, mu_c, log_sigmac_c))
+        return pzc, latent, hidden_enc
 
-        return pzc, latent
-
-    def elbo_loss(self, x, seq_lengths, L=1):
+    def elbo_loss(self, x, seq_lengths, hidden_enc, L=1):
         det = 1e-10
         res_loss = 0.0
-        _, mu, logvar, _ = self.encoder(x, seq_lengths)
+        _, mu, logvar, hidden_enc = self.encoder(x, seq_lengths, hidden_enc)
+
         for l in range(L):
             z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
 
             x_decoded, _ = self.decoder(z, seq_lengths)
 
+            # Since the sequence length are different we want to calculate the loss for each un-masked sequence separately
             if self.is_logits:
-                # res_loss += F.mse_loss(x_decoded, x)
                 res_loss = 0
                 for i, length in enumerate(seq_lengths):
                     res_loss += nn.functional.mse_loss(x_decoded[i, :length], x[i, :length], reduction='sum')
                 res_loss /= len(seq_lengths)
             else:
-                # res_loss += F.binary_cross_entropy(x_decoded, x)
                 res_loss = 0
                 for i, length in enumerate(seq_lengths):
-                    # res_loss += nn.functional.binary_cross_entropy(x_decoded[i, :length], x[i, :length], reduction='sum')
-                    res_loss += self.loss_fn(x_decoded[i, :length], x[i, :length])
-                res_loss /= len(seq_lengths)
+                    res_loss += self.custom_loss_fn(x_decoded[i, :length], x[i, :length])
+                res_loss /= len(seq_lengths) #* x.size(-1)
+        # print(res_loss)
 
         res_loss /= L
-        loss = self.alpha * res_loss * x.size(1)
+        loss = self.alpha * res_loss #* x.size(-1)
+
         pi = self.pi
         log_sigma2_c = self.log_sigma_c
         mu_c = self.mu_c
-
         z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
-        pcz = torch.exp(torch.log(pi.unsqueeze(0)) + self.gaussian_pdfs_log(z, mu_c, log_sigma2_c)) + det
 
+        # calculate the p(z|c) or gamma
+        pcz = torch.exp(torch.log(pi.unsqueeze(0)) + self.gaussian_pdfs_log(z, mu_c, log_sigma2_c)) + det
         pcz = pcz / (pcz.sum(1).view(-1, 1))  # batch_size*clusters
 
-        loss += 0.5 * torch.mean(torch.sum(pcz * torch.sum(log_sigma2_c.unsqueeze(0) +
+        # calculating the KL losses
+        kl_loss_1 =  0.5 * torch.mean(torch.sum(pcz * torch.sum(log_sigma2_c.unsqueeze(0) +
                                                            torch.exp(logvar.unsqueeze(1) - log_sigma2_c.unsqueeze(0)) +
                                                            (mu.unsqueeze(1) - mu_c.unsqueeze(0)) ** 2 / torch.exp(log_sigma2_c.unsqueeze(0)), 2), 1))
+        # print(kl_loss_1)
+        loss += kl_loss_1 #* 0.01
 
-        loss -= torch.mean(torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz)), 1)) + 0.5 * torch.mean(
-            torch.sum(1 + logvar, 1))
+        kl_loss_2 = torch.mean(torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz)), 1)) + 0.5 * torch.mean(torch.sum(1 + logvar, 1))
+        # print(kl_loss_2)
+        loss -= kl_loss_2
 
-        return loss
+        return loss, hidden_enc
 
     def log_gaussians(self, x, mus, logvars):
         G = []
