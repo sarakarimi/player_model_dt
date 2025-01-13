@@ -61,7 +61,7 @@ class TrajectoryDataset(Dataset):
         self.normalize_state = normalize_state
         self.rtg_scale = rtg_scale
         self.preprocess_observations = preprocess_observations
-        # self.cluster_predictions, _ = predict_clusters()
+        self.cluster_predictions, _ = predict_clusters()
         self.load_trajectories()
         self.mode = mode
 
