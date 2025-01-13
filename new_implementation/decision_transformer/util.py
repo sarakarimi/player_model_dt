@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--n_layers", type=int, default=1)
     parser.add_argument("--n_ctx", type=int, default=5)
     parser.add_argument("--layer_norm", type=str, default=None)
-    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--train_epochs", type=int, default=5000)
     parser.add_argument("--test_epochs", type=int, default=10)
     parser.add_argument("--optimizer", type=str, default="AdamW")
