@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
-from metalgridsolid.core.entity import Entity
-from metalgridsolid.core.constants import EnemyState, Color, DIRECTIONS, AgentState
-from metalgridsolid.utils.utils import check_valid_position, draw_triangle
+from envs.metalgridsolid.core.entity import Entity
+from envs.metalgridsolid.core.constants import EnemyState, Color, DIRECTIONS, AgentState
+from envs.metalgridsolid.utils.utils import check_valid_position, draw_triangle
 
 
 class Enemy(Entity):

@@ -1,7 +1,7 @@
 import pygame
 from typing import Any
-from metalgridsolid.core.constants import Color, AgentState
-from metalgridsolid.core.entity import Entity
+from envs.metalgridsolid.core.constants import Color, AgentState
+from envs.metalgridsolid.core.entity import Entity
 
 
 class Item(Entity):

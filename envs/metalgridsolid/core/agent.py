@@ -1,10 +1,10 @@
 from typing import Any
 import numpy as np
 
-from metalgridsolid.core.entity import Entity
-from metalgridsolid.core.constants import Color, DIRECTIONS, AgentState, AgentAction, EnemyState
-from metalgridsolid.utils.utils import check_valid_position, draw_triangle
-from metalgridsolid.utils.logger import Logger
+from envs.metalgridsolid.core.entity import Entity
+from envs.metalgridsolid.core.constants import Color, DIRECTIONS, AgentState, AgentAction, EnemyState
+from envs.metalgridsolid.utils.utils import check_valid_position, draw_triangle
+from envs.metalgridsolid.utils.logger import Logger
 
 class Agent(Entity):
     def __init__(self, position: tuple[int, int], direction: int, init_state: int = AgentState.HIDDEN):

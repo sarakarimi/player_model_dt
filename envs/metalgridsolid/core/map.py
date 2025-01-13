@@ -1,6 +1,6 @@
 import numpy as np
-from metalgridsolid.core.entity import Entity
-from metalgridsolid.core.constants import Color
+# from metalgridsolid.core.entity import Entity
+from envs.metalgridsolid.core.constants import Color
 
 class Obstacle():
     def __init__(self, position: tuple[tuple[int, int]]):
