@@ -65,6 +65,6 @@ def predict_clusters():
         dataset=trajectory_data_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
     )
 
-    dec_cluster.load_state_dict(torch.load("/home/sara/repositories/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"))
+    dec_cluster.load_state_dict(torch.load(path_to_model))
     predicted, Z = evaluate(dec_cluster, gen_dataloader)
     return predicted, Z

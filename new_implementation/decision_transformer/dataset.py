@@ -521,10 +521,10 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
 
 if __name__ == '__main__':
     paths = [
-        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
-        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
-        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
-        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+        "player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        "player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+        "player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        "player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
 
     ]
     trajectory_data_set = TrajectoryDataset(trajectory_paths=paths)
