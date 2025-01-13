@@ -9,7 +9,6 @@ video/
 videos/
 *.pt
 *.hdf5
-*.gz
 /official_implementation/vector_obs/model_saved
 envs/build/lib/metalgridsolid/__init__.py
 envs/build/lib/metalgridsolid/environment.py

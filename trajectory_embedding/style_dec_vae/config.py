@@ -11,7 +11,7 @@ n_clusters = 4
 alpha = 1
 
 paths = [
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
         "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
         "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
         "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",

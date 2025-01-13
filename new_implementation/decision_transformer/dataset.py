@@ -220,6 +220,9 @@ class TrajectoryDataset(Dataset):
         temp = [len(a) for a in self.actions]
         unique1, counts1 = np.unique(temp, return_counts=True)
         print(unique1, counts1)
+        unique2, counts2 = np.unique(self.cluster_predictions, return_counts=True)
+        print(unique2, counts2)
+
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
         num_timesteps = max(int(pct_traj * self.num_timesteps), 1)
@@ -518,11 +521,11 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
 
 if __name__ == '__main__':
     paths = [
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        "/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
 
     ]
     trajectory_data_set = TrajectoryDataset(trajectory_paths=paths)
-
+    print(trajectory_data_set)
