@@ -147,16 +147,16 @@ class TrajectoryDataset(Dataset):
             ]
             self.traj_lens = self.traj_lens[traj_len_mask]
 
-            # filter out un-optimal trajectories
-            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
-            # obs.extend([self.states[i] for i in indexes][-3500:])
-            # acts.extend([self.actions[i] for i in indexes][-3500:])
-            # tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:])) * i)
+            # Filter out un-optimal trajectories
+            indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
+            obs.extend([self.states[i] for i in indexes][-3500:])
+            acts.extend([self.actions[i] for i in indexes][-3500:])
+            tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:])) * i)
 
             # Use mixed trajectories
-            obs.extend(self.states[:4000])
-            acts.extend(self.actions[:4000])
-            tasks.extend(np.ones(len(self.actions[:4000])) * i)
+            # obs.extend(self.states[:4000])
+            # acts.extend(self.actions[:4000])
+            # tasks.extend(np.ones(len(self.actions[:4000])) * i)
 
             # unique, counts = np.unique(self.returns[:], return_counts=True)
             # print(unique, counts)
