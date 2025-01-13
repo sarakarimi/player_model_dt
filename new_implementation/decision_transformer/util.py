@@ -22,6 +22,10 @@ def parse_args():
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
 
     ]) # required=True)
     parser.add_argument("--n_heads", type=int, default=2)
@@ -66,7 +70,7 @@ def parse_args():
     )
     parser.add_argument("--wandb_entity", type=str, default=None)
     parser.add_argument("--test_frequency", type=int, default=1000)
-    parser.add_argument("--eval_frequency", type=int, default=10)
+    parser.add_argument("--eval_frequency", type=int, default=100)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--eval_num_envs", type=int, default=8)
     parser.add_argument(
@@ -78,7 +82,7 @@ def parse_args():
     )
     parser.add_argument("--prob_go_from_end", type=float, default=0.1)
     parser.add_argument("--eval_max_time_steps", type=int, default=1000)
-    parser.add_argument("--cuda", default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--cuda", default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument(
         "--model_type", type=str, default="decision_transformer"
     )

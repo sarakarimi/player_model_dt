@@ -154,24 +154,24 @@ class TrajectoryDataset(Dataset):
 
 
             # Filter out the nun optimal trajectories and then take 3500 sample out of each
-            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
-            # self.actions = [self.actions[i] for i in indexes][-3500:]
-            # self.rewards = [self.rewards[i] for i in indexes][-3500:]
-            # self.dones = [self.dones[i] for i in indexes][-3500:]
-            # self.truncated = [self.truncated[i] for i in indexes][-3500:]
-            # self.states = [self.states[i] for i in indexes][-3500:]
-            # # merge_modes.extend(self.modes)
-            # self.returns = [self.returns[i] for i in indexes][-3500:]
-            # self.timesteps = [self.timesteps[i] for i in indexes][-3500:]
+            indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
+            self.actions = [self.actions[i] for i in indexes][-3500:]
+            self.rewards = [self.rewards[i] for i in indexes][-3500:]
+            self.dones = [self.dones[i] for i in indexes][-3500:]
+            self.truncated = [self.truncated[i] for i in indexes][-3500:]
+            self.states = [self.states[i] for i in indexes][-3500:]
+            # merge_modes.extend(self.modes)
+            self.returns = [self.returns[i] for i in indexes][-3500:]
+            self.timesteps = [self.timesteps[i] for i in indexes][-3500:]
 
             # Use mixed trajectories
-            self.actions = self.actions[:4000]
-            self.rewards = self.rewards[:4000]
-            self.dones = self.dones[:4000]
-            self.truncated = self.truncated[:4000]
-            self.states = self.states[:4000]
-            self.returns = self.returns[:4000]
-            self.timesteps = self.timesteps[:4000]
+            # self.actions = self.actions[:4000]
+            # self.rewards = self.rewards[:4000]
+            # self.dones = self.dones[:4000]
+            # self.truncated = self.truncated[:4000]
+            # self.states = self.states[:4000]
+            # self.returns = self.returns[:4000]
+            # self.timesteps = self.timesteps[:4000]
 
 
 

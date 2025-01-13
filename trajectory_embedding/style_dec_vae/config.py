@@ -15,5 +15,10 @@ paths = [
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+    # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+    # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+    # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+    # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
     ]
-path_to_model = "/home/sara_karimi/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
+# path_to_model = "/home/sara_karimi/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
+path_to_model = "/home/sara/repositories/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
