@@ -74,9 +74,8 @@ def evaluate_dt_agent(
 
     mode_one_hot = None
     if mode_cond:
-        # TODO remove numbers replace with variable
-        mode_one_hot = t.zeros(2).to(device)
-        mode_one_hot[mode - 1] = 1
+        mode_one_hot = t.zeros(model.environment_config.num_modes).to(device)
+        mode_one_hot[mode] = 1
     obs, actions, reward, rtg, timesteps, mask, modes = initialize_padding_inputs(
         max_len=max_len,
         initial_obs=obs,

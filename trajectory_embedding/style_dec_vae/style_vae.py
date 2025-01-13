@@ -119,8 +119,6 @@ class Encoder(nn.Module):
             batch_first=True,
             bidirectional=False,
         )
-        # self.fc21 = nn.Linear(self.hidden_size, self.latent_size)
-        # self.fc22 = nn.Linear(self.hidden_size, self.latent_size)
 
         self.sampling = GaussianSampling(self.hidden_size, self.latent_size)
 
@@ -138,7 +136,6 @@ class Encoder(nn.Module):
         enc_h = hidden_enc[0][-1]  # .view(batch_size, self.hidden_size).to(self.device)
 
         # extract latent variable z(hidden space to latent space)
-
         z, mean, logvar = self.sampling(enc_h)
 
         return z, mean, logvar, hidden_enc
@@ -161,7 +158,6 @@ class Decoder(nn.Module):
         )
         self.fc1 = nn.Linear(self.latent_size, self.hidden_size)
         self.fc2 = nn.Linear(hidden_size, input_size)
-        # self.final = nn.Sigmoid()
 
     def forward(self, z, lengths, total_padding_length=None):
         max_seq_len = max(lengths)
@@ -182,7 +178,6 @@ class Decoder(nn.Module):
         output, _ = torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True, total_length=max_seq_len)
 
         prediction = self.fc2(output)
-        # prediction = self.final(prediction)
         return prediction, hidden
 
 
@@ -249,7 +244,7 @@ class LSTMVAE(nn.Module):
         lengths = args[4]
         loss_fn = MiniGridLoss()
 
-        kld_weight = 0.00025  # Account for the minibatch samples from the dataset
+        kld_weight = 0 #0.00025  # Account for the minibatch samples from the dataset
 
         # MSE loss
         # recons_loss = 0
@@ -269,7 +264,8 @@ class LSTMVAE(nn.Module):
             recons_loss += loss_fn(recons[i, :length], og_input[i, :length])
         recons_loss /= len(lengths)
 
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1))
+
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=-1), dim=0)
 
         loss = recons_loss + kld_weight * kld_loss
         return {
@@ -283,7 +279,7 @@ def train(model, train_loader, test_loader, epochs):
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    steplr = torch.optim.lr_scheduler.StepLR(optimizer, 10, 0.9)
+    steplr = torch.optim.lr_scheduler.StepLR(optimizer, 20, 0.9)
 
     ## training
     count = 0
@@ -299,7 +295,10 @@ def train(model, train_loader, test_loader, epochs):
             lengths = lengths.to(torch.int64)  # .to(model.device)
 
             optimizer.zero_grad()
-            mloss, recon_x, info = model(batch_data, lengths)
+            h_0 = torch.zeros(1, train_loader.batch_size, model.hidden_size).to(model.device)
+            c_0 = torch.zeros(1, train_loader.batch_size, model.hidden_size).to(model.device)
+            hidden_enc = (h_0, c_0)
+            mloss, recon_x, info = model(batch_data, lengths, hidden_enc)
 
             # Backward and optimize
             mloss.mean().backward()
@@ -310,6 +309,7 @@ def train(model, train_loader, test_loader, epochs):
 
     model.eval()
     eval_loss = 0
+    total_rec_loss = 0
     test_iterator = tqdm(
         test_loader, total=len(test_loader), desc="testing"
     )
@@ -319,16 +319,32 @@ def train(model, train_loader, test_loader, epochs):
             batch_data = batch_data.to(torch.float32).to(model.device)
             lengths = lengths.to(torch.int64)  # .to(device)
 
-            mloss, recon_x, info = model(batch_data, lengths)
-            torch.set_printoptions(linewidth=200)
-            print("x", batch_data.to(torch.int32))
-            print("x_hat", convert_to_one_hot(recon_x))
+            h_0 = torch.zeros(1, test_loader.batch_size, model.hidden_size).to(model.device)
+            c_0 = torch.zeros(1, test_loader.batch_size, model.hidden_size).to(model.device)
+            hidden_enc = (h_0, c_0)
+            mloss, recon_x, info = model(batch_data, lengths, hidden_enc)
+            rec_loss = 0
+            rec_xs = []
+            for i, length in enumerate(lengths):
+                rec_x = convert_to_one_hot(recon_x[i, :length])
+                rec_xs.append(rec_x)
+                rec_loss += nn.MSELoss(reduction='sum')(rec_x, batch_data[i, :length])
+            rec_loss /= len(lengths)
+            total_rec_loss += rec_loss.item()
             eval_loss += mloss.mean().item()
 
-            test_iterator.set_postfix({"eval_loss": float(mloss.mean())})
+            test_iterator.set_postfix({"eval_loss": mloss.mean().item()})
+            test_iterator.set_postfix({"eval_rec_loss": rec_loss.item()})
+        torch.set_printoptions(linewidth=1000)
+        print("x", batch_data.to(torch.int32))
+        print("x_hat", rec_xs)
 
     eval_loss = eval_loss / len(test_loader)
+    total_rec_loss = total_rec_loss / len(test_loader)
+
     print("Evaluation Score : [{}]".format(eval_loss))
+    print("Evaluation reconstruction bit-wise loss : [{}]".format(total_rec_loss))
+
 
     return model
 
@@ -338,17 +354,16 @@ if __name__ == "__main__":
     input_size = 500  # Number of features in each timestep
     hidden_size = 128  # 20
     latent_size = 10  # 8
-    num_epochs = 10  # 10000
-    batch_size =  1 #32
-
+    num_epochs = 200  # 10000
+    batch_size =  128
 
     paths = [
-        "data/PPO_trajectories_goal0.gz",
-        "data/PPO_trajectories_goal5.gz",
-        "data/PPO_trajectories_goal6.gz",
-        "data/PPO_trajectories_goal3.gz",
-
+        "../datasets/minigrid/PPO_trajectories_goal0.gz",
+        "../datasets/minigrid/PPO_trajectories_goal1.gz",
+        "../datasets/minigrid/PPO_trajectories_goal2.gz",
+        "../datasets/minigrid/PPO_trajectories_goal3.gz",
     ]
+
     trajectory_data_set = MiniGridDataset(trajectory_paths=paths)
     train_loader = torch.utils.data.DataLoader(
         dataset=trajectory_data_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn

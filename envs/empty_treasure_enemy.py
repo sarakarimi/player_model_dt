@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from envs.minigrid_dungeon.core.grid import Grid
-from envs.minigrid_dungeon.core.mission import MissionSpace
-from envs.minigrid_dungeon.core.world_object import Goal, Treasure, Weapon, Enemy, Lava
-from envs.minigrid_dungeon.manual_control import ManualControl
-from envs.minigrid_dungeon.minigrid_env import MiniGridDungeonEnv
+from envs.old.minigrid_dungeon.core.grid import Grid
+from envs.old.minigrid_dungeon.core.mission import MissionSpace
+from envs.old.minigrid_dungeon.core.world_object import Goal, Treasure, Weapon, Enemy, Lava
+from envs.old.minigrid_dungeon.manual_control import ManualControl
+from envs.old.minigrid_dungeon.minigrid_env import MiniGridDungeonEnv
 
 
 class EmptyTreasureEnemyEnv(MiniGridDungeonEnv):

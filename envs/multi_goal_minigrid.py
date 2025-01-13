@@ -109,7 +109,7 @@ class SimpleActions(IntEnum):
 class MultiGoalEnv(MiniGridEnv):
     def __init__(
         self,
-        size: int = 13,
+        size: int = 25,
         num_goals: int = 1,
         select_id_goal: Union[int, List[int]] = 0,
         agent_start_pos: Union[Tuple[int, int], None] = None,
@@ -249,7 +249,7 @@ def main() -> None:
 
     env = MultiGoalEnv(render_mode="human", 
                        num_goals = 8,       # Maximum number of goals is 8
-                       select_id_goal = [1, 2])
+                       select_id_goal = [0, 1, 2, 3])
 
     # enable manual control for testing
     manual_control = MultiGoalManualControl(env, seed=42)

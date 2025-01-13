@@ -42,6 +42,7 @@ class EnvironmentConfig:
     observation_space: None = None
     device: str = "cpu"
     env_mode: int = 1
+    num_modes: int = 4
 
     def __post_init__(self):
         # env = gym.make(self.env_id)

@@ -130,23 +130,23 @@ def train(
             else 7,
         )
 
-        if offline_config.mode_conditioning:
-            mode = 0
-        else:
-            mode = offline_config.env_mode
+        # if offline_config.mode_conditioning:
+        #     mode = 0
+        # else:
+        #     mode = offline_config.env_mode
 
-        eval_env_func = make_env(
-            config=eval_env_config,
-            seed=batch,
-            idx=0,
-            run_name=f"dt_eval_videos_{batch}",
-            mode=mode
-        )
 
-        eval_env_modes = [1, 2]
+        eval_env_modes = [0, 1, 2, 3]
         if epoch % offline_config.eval_frequency == 0:
             for rtg in offline_config.initial_rtg:
                 for mode in eval_env_modes:
+                    eval_env_func = make_env(
+                        config=eval_env_config,
+                        seed=batch,
+                        idx=0,
+                        run_name=f"dt_eval_videos_{batch}",
+                        mode=mode
+                    )
                     evaluate_dt_agent(
                         model=model,
                         env_func=eval_env_func,

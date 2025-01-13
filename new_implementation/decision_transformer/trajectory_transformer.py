@@ -54,7 +54,7 @@ class TrajectoryTransformer(nn.Module):
         self.transformer = self.initialize_easy_transformer()
 
         self.action_predictor = nn.Linear(
-            self.transformer_config.d_model * 2, environment_config.action_space.n
+            self.transformer_config.d_model, environment_config.action_space.n
         )
         self.initialize_state_predictor()
 
@@ -303,7 +303,7 @@ class DecisionTransformer(TrajectoryTransformer):
             nn.Linear(1, self.transformer_config.d_model, bias=False)
         )
         self.mode_embedding = nn.Sequential(
-            nn.Linear(2, self.transformer_config.d_model, bias=False)
+            nn.Linear(environment_config.num_modes, self.transformer_config.d_model, bias=False)
         )
         self.reward_predictor = nn.Linear(self.transformer_config.d_model, 1)
 
@@ -371,7 +371,6 @@ class DecisionTransformer(TrajectoryTransformer):
             dtype=torch.float32,
             device=state_embeddings.device,
         )  # batches, blocksize, n_embd
-
         if action_embeddings is not None:
             token_embeddings[:, ::3, :] = reward_embeddings
             token_embeddings[:, 1::3, :] = state_embeddings
@@ -410,11 +409,12 @@ class DecisionTransformer(TrajectoryTransformer):
         )
         if mode is not None:
             # batch_size, seq_length = states.shape[0], states.shape[1]
-            mode_seq_length = mode.shape[1]
+            mode_seq_length = 1 #mode.shape[1]
             mode_embeddings = self.mode_embedding(mode.type(torch.float32))
-            mode_stacked_inputs = torch.stack((mode_embeddings, mode_embeddings, mode_embeddings), dim=1)
-            mode_stacked_inputs = mode_stacked_inputs.permute(0, 2, 1, 3)
-            mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 3 * mode_seq_length,
+            mode_stacked_inputs = mode_embeddings
+            # mode_stacked_inputs = torch.stack((mode_embeddings, mode_embeddings, mode_embeddings), dim=1)
+            mode_stacked_inputs = mode_stacked_inputs.permute(0, 1, 2) #(0, 2, 1, 3)
+            mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 1, #3 * mode_seq_length,
                                                               self.transformer_config.d_model)
             # stacking the token_embeddings add mode
             token_embeddings = torch.cat((mode_stacked_inputs, token_embeddings), dim=1)
@@ -447,18 +447,17 @@ class DecisionTransformer(TrajectoryTransformer):
             # TODO replace with einsum
             if (x.shape[1] % 3 != 0) and ((x.shape[1] + 1) % 3 == 0):
                 x = torch.concat((x, x[:, -2].unsqueeze(1)), dim=1)
-
             if mode is None:
                 x = x.reshape(
                     batch_size, seq_length, 3, self.transformer_config.d_model
                 )
             else:
                 x = x.reshape(
-                    batch_size, seq_length, -1, 3, self.transformer_config.d_model
+                    batch_size, -1, 3, self.transformer_config.d_model
                 )
 
-            x = x.permute(0, 3, 1, 2, 4)
-            x = rearrange(x, "batch b seq_len a d -> batch b seq_len (a d)")
+            x = x.permute(0, 2, 1, 3)# x.permute(0, 3, 1, 2, 4)
+            # x = rearrange(x, "batch b seq_len a d -> batch b seq_len (a d)")
 
             # predict next return given state and action
             reward_preds = None #self.predict_rewards(x[:, 2])
@@ -466,7 +465,6 @@ class DecisionTransformer(TrajectoryTransformer):
             state_preds = None #self.predict_states(x[:, 2])
             # predict next action given state and RTG
             action_preds = self.predict_actions(x[:, 1])
-
             return state_preds, action_preds, reward_preds
 
         else:
@@ -518,7 +516,6 @@ class DecisionTransformer(TrajectoryTransformer):
         # embed states and recast back to (batch, block_size, n_embd)
         token_embeddings = self.to_tokens(states, actions, rtgs, timesteps, mode)
         x = self.transformer(token_embeddings)
-        # print("output", x.shape, seq_length)
         state_preds, action_preds, reward_preds = self.get_logits(
             x, batch_size, seq_length, no_actions=no_actions, mode=mode
         )

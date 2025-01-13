@@ -10,6 +10,8 @@ from functorch.einops import rearrange
 from torch.utils.data import Dataset
 from minigrid.core.constants import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX
 
+from trajectory_embedding.style_dec_vae.eval import predict_clusters
+
 
 class TrajectoryReader:
     """
@@ -59,11 +61,13 @@ class TrajectoryDataset(Dataset):
         self.normalize_state = normalize_state
         self.rtg_scale = rtg_scale
         self.preprocess_observations = preprocess_observations
+        self.cluster_predictions, _ = predict_clusters()
         self.load_trajectories()
         self.mode = mode
 
+
     def load_trajectories(self) -> None:
-        merge_observations, merge_actions, merge_rewards, merge_dones, merge_truncated, merge_infos, merge_modes, merge_timesteps = [], [], [], [], [], [], [], []
+        merge_observations, merge_actions, merge_rewards, merge_returns, merge_dones, merge_truncated, merge_infos, merge_modes, merge_timesteps = [], [], [], [], [], [], [], [], []
 
         # used only for DEC-VAE experiments
         obs, acts, tasks = [], [], []
@@ -78,9 +82,10 @@ class TrajectoryDataset(Dataset):
             dones = data["data"].get("dones")
             truncated = data["data"].get("truncated")
             infos = data["data"].get("infos")
-            mode = np.zeros((int(len(dones) / (i + 1)), 8, 2))
-            mode[:, :, i] = 1
-            modes = mode
+            # mode = np.zeros((int(len(dones) / (i + 1)), 8, len(self.trajectory_paths)))
+            # TODO chane to use DEC model
+            # mode[:, :, i] = 1
+            # modes = mode
 
             # from collections import Counter
             # returns = ['%.2f' % r.sum() for r in rewards]
@@ -90,7 +95,7 @@ class TrajectoryDataset(Dataset):
             rewards = np.array(rewards)
             dones = np.array(dones)
             infos = np.array(infos, dtype=np.ndarray)
-            modes = np.array(modes)
+            # modes = np.array(modes)
 
             # check whether observations are flat or an image
             if observations.shape[-1] == 3:
@@ -102,10 +107,9 @@ class TrajectoryDataset(Dataset):
                     "Observations are not flat or images, check the shape of the observations: ",
                     observations.shape,
                 )
-            # TODO change the format back for DT
             if self.observation_type != "flat":
                 t_observations = rearrange(
-                    torch.tensor(observations), "t b h w c -> (b t) (h w c)" #"t b h w c -> (b t) h w c"
+                    torch.tensor(observations), "t b h w c -> (b t) h w c" # "t b h w c -> (b t) (h w c)"  --> format used by traj embedding model
                 )
             else:
                 t_observations = rearrange(
@@ -116,7 +120,7 @@ class TrajectoryDataset(Dataset):
             t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
             t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
             t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
-            t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
+            # t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
             t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
             done_indices = torch.where(t_done_or_truncated)[0]
 
@@ -125,10 +129,10 @@ class TrajectoryDataset(Dataset):
             self.dones = torch.tensor_split(t_dones, done_indices + 1)
             self.truncated = torch.tensor_split(t_truncated, done_indices + 1)
             self.states = torch.tensor_split(t_observations, done_indices + 1)
-            self.modes = torch.tensor_split(t_modes, done_indices + 1)
+            # self.modes = torch.tensor_split(t_modes, done_indices + 1)
             self.returns = [r.sum() for r in self.rewards]
             self.returns = ['%.2f' % elem for elem in self.returns]
-            unique, counts = np.unique(self.returns, return_counts=True)
+            # unique, counts = np.unique(self.returns, return_counts=True)
             # print(unique, counts)
             self.timesteps = [torch.arange(len(i)) for i in self.states]
             self.traj_lens = np.array([len(i) for i in self.states])
@@ -142,22 +146,27 @@ class TrajectoryDataset(Dataset):
                 i for i, m in zip(self.truncated, traj_len_mask) if m
             ]
             self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
-            self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
+            # self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
             self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
             self.timesteps = [
                 i for i, m in zip(self.timesteps, traj_len_mask) if m
             ]
+
+
+            # filter out the nun optimal trajectories and then take 3500 sample out of each
+            indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
+            self.actions = [self.actions[i] for i in indexes][-3500:]
+            self.rewards = [self.rewards[i] for i in indexes][-3500:]
+            self.dones = [self.dones[i] for i in indexes][-3500:]
+            self.truncated = [self.truncated[i] for i in indexes][-3500:]
+            self.states = [self.states[i] for i in indexes][-3500:]
+            # merge_modes.extend(self.modes)
+            self.returns = [self.returns[i] for i in indexes][-3500:]
+            self.timesteps = [self.timesteps[i] for i in indexes][-3500:]
+
+
+
             self.traj_lens = self.traj_lens[traj_len_mask]
-
-            # TODO move this out as it is only used only for DEC-VAE experiments
-            obs.extend(self.states[:])
-            acts.extend(self.actions[:])
-            tasks.extend(np.ones(len(self.actions[:])) * i)# self.modes[:50])
-            self.obs = obs
-            self.acts = acts
-            self.tasks = tasks
-
-
             self.num_timesteps = sum(self.traj_lens)
             self.num_trajectories = len(self.states)
 
@@ -179,15 +188,23 @@ class TrajectoryDataset(Dataset):
             if self.preprocess_observations == one_hot_encode_observation:
                 self.observation_type = "one_hot"
 
+
             # merge datasets
             merge_actions.extend(self.actions)
             merge_rewards.extend(self.rewards)
             merge_dones.extend(self.dones)
             merge_truncated.extend(self.truncated)
             merge_observations.extend(self.states)
-            merge_modes.extend(self.modes)
-            merge_rewards.extend(self.returns)
+            # merge_modes.extend(self.modes)
+            merge_returns.extend(self.returns)
             merge_timesteps.extend(self.timesteps)
+
+
+        # adding the clusters data from the pre-trained clustering model
+        assert len(self.cluster_predictions) == len(merge_actions), print(len(self.cluster_predictions),  len(merge_actions))
+        merge_modes = np.zeros((len(self.cluster_predictions), len(self.trajectory_paths)))
+        for i, pred in enumerate(self.cluster_predictions):
+            merge_modes[i][pred] = 1
 
         self.actions = merge_actions
         self.rewards = merge_rewards
@@ -195,9 +212,14 @@ class TrajectoryDataset(Dataset):
         self.truncated = merge_truncated
         self.states = merge_observations
         self.modes = merge_modes
-        self.returns = merge_rewards
+        self.returns = merge_returns
         self.timesteps = merge_timesteps
 
+        unique, counts = np.unique(self.returns, return_counts=True)
+        print(unique, counts)
+        temp = [len(a) for a in self.actions]
+        unique1, counts1 = np.unique(temp, return_counts=True)
+        print(unique1, counts1)
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
         num_timesteps = max(int(pct_traj * self.num_timesteps), 1)
@@ -334,13 +356,13 @@ class TrajectoryDataset(Dataset):
 
         if self.mode:
             traj_modes = self.modes[traj_index]
-            modes = traj_modes[si: si + max_len].reshape(1, -1, 2)
-            modes = self.add_padding(modes, -10, padding_required)
+            modes = traj_modes.reshape(1, -1)
+            # modes = self.add_padding(modes, -10, padding_required)
             if isinstance(modes, torch.Tensor):
                 modes = modes.to(dtype=torch.long, device=self.device)
             else:
                 modes = torch.from_numpy(modes).to(dtype=torch.float32, device=self.device)
-            modes = modes.squeeze(0)
+            # modes = modes.squeeze(0)
             return *self.return_tensors(s, a, r, rtg, d, ti, m), modes
         return self.return_tensors(s, a, r, rtg, d, ti, m)
 
@@ -495,8 +517,12 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
 
 
 if __name__ == '__main__':
-    paths = ["/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode1.gz",
-             "/home/sara/repositories/player_model_dt/data/new_implementation_datasets/PPO_trajectories_mode2.gz"
-             ]
+    paths = [
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+
+    ]
     trajectory_data_set = TrajectoryDataset(trajectory_paths=paths)
-    print(trajectory_data_set.tasks)
+

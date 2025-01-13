@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from style_vae import Decoder, Encoder
+
+from trajectory_embedding.style_dec_vae.style_vae import Encoder, Decoder
 from trajectory_embedding.style_dec_vae.utils.loss import MiniGridLoss
 from trajectory_embedding.style_dec_vae.utils.distributions import log_gaussian
 
@@ -32,9 +33,9 @@ class ClusteringBasedVAE(nn.Module):
         self.n_centroids = n_clusters
 
         # learnable GMM parameters initialization
-        self.pi = nn.Parameter(torch.ones(self.n_centroids, dtype=torch.float32) / self.n_centroids, requires_grad=True)
-        self.mu_c = nn.Parameter(torch.zeros((self.n_centroids, self.latent_size), dtype=torch.float32), requires_grad=True)
-        self.log_sigma_c = nn.Parameter(torch.ones((self.n_centroids, self.latent_size), dtype=torch.float32), requires_grad=True)
+        self.pi = nn.Parameter(torch.ones(self.n_centroids, dtype=torch.float32) / self.n_centroids)
+        self.mu_c = nn.Parameter(torch.zeros((self.n_centroids, self.latent_size), dtype=torch.float32))
+        self.log_sigma_c = nn.Parameter(torch.ones((self.n_centroids, self.latent_size), dtype=torch.float32))
 
         self.custom_loss_fn = MiniGridLoss()
 
@@ -50,9 +51,9 @@ class ClusteringBasedVAE(nn.Module):
         return pzc, latent, hidden_enc
 
     def elbo_loss(self, x, seq_lengths, hidden_enc, L=1):
-        det = 1e-10
+        det = 1e-5 # change back to 1e-10
         res_loss = 0.0
-        _, mu, logvar, hidden_enc = self.encoder(x, seq_lengths, hidden_enc)
+        z, mu, logvar, hidden_enc = self.encoder(x, seq_lengths, hidden_enc)
 
         for l in range(L):
             z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
@@ -70,7 +71,6 @@ class ClusteringBasedVAE(nn.Module):
                 for i, length in enumerate(seq_lengths):
                     res_loss += self.custom_loss_fn(x_decoded[i, :length], x[i, :length])
                 res_loss /= len(seq_lengths) #* x.size(-1)
-        # print(res_loss)
 
         res_loss /= L
         loss = self.alpha * res_loss #* x.size(-1)
@@ -85,24 +85,22 @@ class ClusteringBasedVAE(nn.Module):
         pcz = pcz / (pcz.sum(1).view(-1, 1))  # batch_size*clusters
 
         # calculating the KL losses
-        kl_loss_1 =  0.5 * torch.mean(torch.sum(pcz * torch.sum(log_sigma2_c.unsqueeze(0) +
+        kl_loss_1 =  0.5 * torch.sum(pcz * torch.sum(log_sigma2_c.unsqueeze(0) +
                                                            torch.exp(logvar.unsqueeze(1) - log_sigma2_c.unsqueeze(0)) +
-                                                           (mu.unsqueeze(1) - mu_c.unsqueeze(0)) ** 2 / torch.exp(log_sigma2_c.unsqueeze(0)), 2), 1))
-        # print(kl_loss_1)
-        loss += kl_loss_1 #* 0.01
+                                                           (mu.unsqueeze(1) - mu_c.unsqueeze(0)) ** 2 / torch.exp(log_sigma2_c.unsqueeze(0)), 2), 1)
 
-        kl_loss_2 = torch.mean(torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz)), 1)) + 0.5 * torch.mean(torch.sum(1 + logvar, 1))
-        # print(kl_loss_2)
-        loss -= kl_loss_2
+        kl_loss_2 = -torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz)), 1)
 
-        return loss, hidden_enc
+        kl_loss_3 = -0.5 * torch.sum(1 + logvar, 1)
 
-    def log_gaussians(self, x, mus, logvars):
-        G = []
-        for c in range(self.n_centroids):
-            G.append(log_gaussian(x, mus[c:c + 1, :], logvars[c:c + 1, :]).view(-1, 1))
+        kl_loss_1 = kl_loss_1.mean()
+        kl_loss_2 = kl_loss_2.mean()
+        kl_loss_3 = kl_loss_3.mean()
+        loss = loss + kl_loss_1 + kl_loss_2 + kl_loss_3
 
-        return torch.cat(G, 1)
+        return loss, res_loss, kl_loss_1, kl_loss_2 + kl_loss_3, hidden_enc
+
+
 
     def gaussian_pdfs_log(self, x, mus, log_sigma2s):
         G = []

@@ -2,6 +2,9 @@ import gymnasium as gym
 from minigrid.minigrid_env import MiniGridEnv
 from minigrid.wrappers import FullyObsWrapper, OneHotPartialObsWrapper, ViewSizeWrapper
 import numpy as np
+
+from envs.base_level_human_mgs import metal_grid_env
+from envs.multi_goal_minigrid import MultiGoalEnv
 from new_implementation.configs import EnvironmentConfig
 from envs.double_goal_minigrid import DoubleGoalEnv
 
@@ -22,7 +25,9 @@ def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode
             kwargs["max_steps"] = config.max_steps
 
         # env = gym.make(config.env_id, **kwargs)
-        env = DoubleGoalEnv(mode=mode, agent_start_pos=None, agent_pov=config.view_size, **kwargs)
+        # env = DoubleGoalEnv(mode=mode, agent_start_pos=None, agent_pov=config.view_size, **kwargs)
+        env = MultiGoalEnv(num_goals=8, select_id_goal=mode, **kwargs) #0, 1, 2, 3
+        # env = metal_grid_env()
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if config.capture_video and idx == 0:

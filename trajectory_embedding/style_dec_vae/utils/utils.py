@@ -17,6 +17,7 @@ import torch.nn.functional as F
 
 def convert_to_one_hot(reconstructed_data):
     one_hot_outputs = []
+    reconstructed_data = reconstructed_data.view(-1, 25, 20)
     category_ranges = [(0, 11), (11, 17), (17, 20)]
 
     # Loop over each group of categories and apply argmax + one_hot encoding
@@ -34,8 +35,8 @@ def convert_to_one_hot(reconstructed_data):
         one_hot_outputs.append(one_hot)
 
     # Concatenate the one-hot encoded outputs along the channel dimension (last dimension)
-    # print(one_hot_outputs)
-    one_hot_data = torch.cat(one_hot_outputs, dim=2)  # Shape: (batch_size, w*h, c)
+    one_hot_data = torch.cat(one_hot_outputs, dim=-1)  # Shape: (batch_size, w*h, c)
+    one_hot_data = one_hot_data.view(-1, 500)
 
     return one_hot_data
 
@@ -49,7 +50,6 @@ def cluster_accuracy(predicted: np.array, target: np.array):
 
     for i in range(predicted.size):
         w[predicted[i], target[i]] += 1
-
     ind_1, ind_2 = linear_sum_assignment(w.max() - w)
     return sum([w[i, j] for i, j in zip(ind_1, ind_2)]) * 1.0 / predicted.size, w
 

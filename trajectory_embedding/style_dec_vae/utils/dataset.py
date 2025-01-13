@@ -147,15 +147,20 @@ class TrajectoryDataset(Dataset):
             ]
             self.traj_lens = self.traj_lens[traj_len_mask]
 
-            obs.extend(self.states[:500])
-            acts.extend(self.actions[:500])
-            tasks.extend(np.ones(len(self.actions[:500])) * i)  # self.modes[:50])
-            # unique, counts = np.unique(self.returns[:1000], return_counts=True)
+            indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
+            obs.extend([self.states[i] for i in indexes][-3500:])
+            acts.extend([self.actions[i] for i in indexes][-3500:])
+            tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:])) * i)
+            # unique, counts = np.unique(self.returns[:], return_counts=True)
             # print(unique, counts)
+            # temp = [len(a) for a in self.actions[:]]
+            # unique1, counts1 = np.unique(temp, return_counts=True)
+            # print(unique1, counts1)
 
-            self.obs = obs
-            self.acts = acts
-            self.tasks = tasks
+        self.obs = obs
+        self.acts = acts
+        self.tasks = tasks
+        # print(len(self.obs))
 
 
     def get_indices_of_top_p_trajectories(self, pct_traj):

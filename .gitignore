@@ -9,6 +9,7 @@ video/
 videos/
 *.pt
 *.hdf5
+*.gz
 /official_implementation/vector_obs/model_saved
 envs/build/lib/metalgridsolid/__init__.py
 envs/build/lib/metalgridsolid/environment.py
@@ -30,5 +31,5 @@ player_model_dt.egg-info/dependency_links.txt
 player_model_dt.egg-info/PKG-INFO
 player_model_dt.egg-info/SOURCES.txt
 player_model_dt.egg-info/top_level.txt
-trajectory_embedding/atari/style_dec_vae/model
-trajectory_embedding/atari/style_dec_vae/output
+trajectory_embedding/style_dec_vae/model
+trajectory_embedding/style_dec_vae/output

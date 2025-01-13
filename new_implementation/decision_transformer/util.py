@@ -13,11 +13,17 @@ def parse_args():
         description="Train a decision transformer on a trajectory dataset.",
         epilog="The last enemy that shall be defeated is death.",
     )
-    parser.add_argument("--exp_name", type=str, default="MiniGrid-DoubleGoalEnv")
+    parser.add_argument("--exp_name", type=str, default="MiniGrid-MultiGoalEnv")
     parser.add_argument("--mode_conditioning", type=bool, default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument("--env_mode", type=int, default=1)
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--trajectory_paths", nargs='+', default=["../../data/new_implementation_datasets/PPO_trajectories_mode1.gz", "../../data/new_implementation_datasets/PPO_trajectories_mode2.gz"]) # required=True)
+    parser.add_argument("--trajectory_paths", nargs='+', default=[
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+
+    ]) # required=True)
     parser.add_argument("--n_heads", type=int, default=2)
     parser.add_argument("--d_mlp", type=int, default=256)
     parser.add_argument("--activation_fn", type=str, default="relu")
@@ -25,7 +31,7 @@ def parse_args():
     parser.add_argument("--n_layers", type=int, default=1)
     parser.add_argument("--n_ctx", type=int, default=5)
     parser.add_argument("--layer_norm", type=str, default=None)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--train_epochs", type=int, default=5000)
     parser.add_argument("--test_epochs", type=int, default=10)
     parser.add_argument("--optimizer", type=str, default="AdamW")
@@ -68,11 +74,11 @@ def parse_args():
         action="append",
         help="<Required> Set flag",
         required=False,
-        default=[-1, 0, 1],
+        default=[1],
     )
     parser.add_argument("--prob_go_from_end", type=float, default=0.1)
     parser.add_argument("--eval_max_time_steps", type=int, default=1000)
-    parser.add_argument("--cuda", default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--cuda", default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument(
         "--model_type", type=str, default="decision_transformer"
     )
@@ -378,8 +384,9 @@ def initialize_padding_inputs(
             * action_pad_token
     ).to(device)
 
-    mode = mode * torch.ones(
-        (batch_size, max_len, 1), dtype=torch.float
-    ).to(device)
-
+    # mode = mode * torch.ones(
+    #     (batch_size, max_len, 1), dtype=torch.float
+    # ).to(device)
+    mode = mode* torch.ones((batch_size, 1, 1), dtype=torch.float).to(device)
+    # print(mode)
     return obs, actions, reward, rtg, timesteps, mask, mode
