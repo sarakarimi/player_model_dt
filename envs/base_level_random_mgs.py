@@ -1,10 +1,10 @@
 import time
 import numpy as np
-from metalgridsolid.core.item import Camouflage
-from metalgridsolid.environment import MetalGridSolidEnv
-from metalgridsolid.core.enemy import PatrollingEnemy, StandingEnemy
-from metalgridsolid.core.agent import Agent
-from metalgridsolid.utils.utils import create_horizontal_limit, create_vertical_limit
+from envs.metalgridsolid.core.item import Camouflage
+from envs.metalgridsolid.environment import MetalGridSolidEnv
+from envs.metalgridsolid.core.enemy import PatrollingEnemy, StandingEnemy
+from envs.metalgridsolid.core.agent import Agent
+from envs.metalgridsolid.utils.utils import create_horizontal_limit, create_vertical_limit
 
 
 if __name__ == "__main__":
