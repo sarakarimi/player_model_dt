@@ -2,13 +2,13 @@ from typing import Tuple, Any
 import gymnasium as gym
 import pygame
 from gymnasium import spaces
-from metalgridsolid.core.map import Ground, Vent, Obstacle, Goal
+from envs.metalgridsolid.core.map import Ground, Vent, Obstacle, Goal
 import numpy as np
-from metalgridsolid.core.enemy import Enemy
-from metalgridsolid.core.agent import Agent
-from metalgridsolid.core.item import Item
-from metalgridsolid.core.constants import DIRECTIONS, Color, EnvID
-from metalgridsolid.utils.logger import Logger
+from envs.metalgridsolid.core.enemy import Enemy
+from envs.metalgridsolid.core.agent import Agent
+from envs.metalgridsolid.core.item import Item
+from envs.metalgridsolid.core.constants import DIRECTIONS, Color, EnvID
+from envs.metalgridsolid.utils.logger import Logger
 
 class EnvState:
     def __init__(self, 
