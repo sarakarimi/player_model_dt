@@ -8,7 +8,7 @@ from dopamine.replay_memory import circular_replay_buffer
 import numpy as np
 import tensorflow as tf
 
-from decision_transformers.img_obs.utils.utils import set_seed
+from official_implementation.img_obs.utils.utils import set_seed
 
 gfile = tf.io.gfile
 

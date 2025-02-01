@@ -6,8 +6,8 @@ import gymnasium as gym
 import pygame
 from gymnasium import Env
 
-from envs.minigrid_dungeon.core.actions import Actions
-from envs.minigrid_dungeon.minigrid_env import MiniGridDungeonEnv
+from envs.old.minigrid_dungeon.core.actions import Actions
+from envs.old.minigrid_dungeon.minigrid_env import MiniGridDungeonEnv
 from minigrid.wrappers import ImgObsWrapper, RGBImgPartialObsWrapper
 
 

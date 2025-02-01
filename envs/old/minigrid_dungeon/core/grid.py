@@ -4,9 +4,9 @@ import math
 from typing import Any, Callable
 
 import numpy as np
-from envs.minigrid_dungeon.core.constants import OBJECT_TO_IDX, TILE_PIXELS
-from envs.minigrid_dungeon.core.world_object import Wall, WorldObj
-from envs.minigrid_dungeon.utils.rendering import (
+from envs.old.minigrid_dungeon.core.constants import OBJECT_TO_IDX, TILE_PIXELS
+from envs.old.minigrid_dungeon.core.world_object import Wall, WorldObj
+from envs.old.minigrid_dungeon.utils.rendering import (
     downsample,
     fill_coords,
     highlight_img,

@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import EvalCallback
 from envs.double_goal_minigrid import DoubleGoalEnv
 from minigrid.wrappers import RGBImgObsWrapper, ImgObsWrapper
 
-from envs.minigrid_wrappers import FullyObsFeatureWrapper
+from envs.old.minigrid_wrappers import FullyObsFeatureWrapper
 
 sys.modules["gym"] = gym
 

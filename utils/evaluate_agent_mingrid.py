@@ -8,7 +8,9 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from envs.double_goal_minigrid import DoubleGoalEnv
 from minigrid.wrappers import RGBImgObsWrapper, ImgObsWrapper
 
-from envs.minigrid_wrappers import FullyObsFeatureWrapper
+
+from envs.multi_goal_minigrid import MultiGoalEnv
+from envs.old.minigrid_wrappers import FullyObsFeatureWrapper
 
 sys.modules["gym"] = gym
 
@@ -20,9 +22,10 @@ def main() -> None:
     parser.add_argument(
         "-m",
         "--mode",
+        default=0,
         type=int,
         help="Double goal minigrid env mode (0 - Double goals; 1 - Upper goal; 2 - Lower goal)",
-        required=True,
+        # required=True,
     )
     parser.add_argument(
         "-eval",
@@ -61,14 +64,16 @@ def main() -> None:
         env = ImgObsWrapper(env)
         model = PPO("CnnPolicy", env, verbose=1, n_epochs=50)
     else:
-        env = FullyObsFeatureWrapper(
-            DoubleGoalEnv(
-                mode=args.mode,
-                render_mode="rgb_array",
-                agent_start_pos=None,
-                max_steps=50,
-            )
-        )
+        # env = FullyObsFeatureWrapper(
+        #     DoubleGoalEnv(
+        #         mode=args.mode,
+        #         render_mode="rgb_array",
+        #         agent_start_pos=None,
+        #         max_steps=50,
+        #     )
+        # )
+        env = FullyObsFeatureWrapper(MultiGoalEnv(render_mode='human', num_goals=8, select_id_goal=[0])) #0, 5, 6, 3
+
         model = PPO("MlpPolicy", env, verbose=1)
 
     # Load model weights
