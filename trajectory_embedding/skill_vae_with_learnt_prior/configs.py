@@ -1,0 +1,17 @@
+config = {
+    'env_name': "atari",
+    'seed': 0,
+    'reg': 0.1,
+    'tanh': True,
+    'traj_length': 28, #
+    'batch_size': 50,
+    'latent_dim':  2,
+    'latent_reg': 0.1,
+    'hidden_dims': [200, 200],
+    'num_eval': 500,
+    'eval_interval': 10,
+    'train_epochs': 600,
+    'goal_idxs': None,
+    'render': True,
+    'dataset_path': "VAE/atari/dataset_competitive_ai_human_383_episodes.hdf5",
+}
