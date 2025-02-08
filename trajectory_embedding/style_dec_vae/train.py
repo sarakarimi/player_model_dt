@@ -18,6 +18,7 @@ pretrained_save_path = 'model/pretrained/model.pt'
 
 def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **params):
     if os.path.exists(pretrained_save_path):
+        print("here")
         model.load_state_dict(torch.load(pretrained_save_path))
 
         model.eval()
@@ -250,8 +251,8 @@ if __name__ == '__main__':
     # train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
 
     # Evaluate trained model
-    # dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-01-08-13-25"))
-    # predicted, Z = eval(dec_cluster, gen_dataloader)
+    dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-08-16-00"))
+    predicted, Z = evaluate(dec_cluster, gen_dataloader)
 
 
 

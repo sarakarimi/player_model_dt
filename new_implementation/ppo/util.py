@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="MiniGrid-multi-goal",
+        default="metal-grid-camouflage",
         help="the name of this experiment",
     )
     parser.add_argument(
@@ -154,7 +154,7 @@ def parse_args():
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/data/PPO_trajectories_goal3.gz",
+        default="/home/sara/repositories/player_model_dt/data/PPO_trajectories_metal-grid_camouflage.gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(

@@ -3,22 +3,24 @@ dimensions = [500, 128, 10]
 model_params = {
     'decoder_final_activation': 'relu',
     'pretrained_epochs': 200,
-    'epochs': 500,
+    'epochs': 8,
     'save_path': 'output/model'
 }
 batch_size = 200  # 64
-n_clusters = 4
+n_clusters = 2 #4
 alpha = 1
 
 paths = [
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
         "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
-        "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
-        "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
     # "C:/Users/azadg/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
     # "C:/Users/azadg/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
     # "C:/Users/azadg/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
     # "C:/Users/azadg/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
     ]
-path_to_model = "/home/sara_karimi/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
+# path_to_model = "/home/sara_karimi/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
 # path_to_model = "C:/Users/azadg/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-01-08-13-25"
+path_to_model = "/home/sara_karimi/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-02-08-16-00"
+# path_to_model = "C:/Users/azadg/player_model_dt/trajectory_embedding/style_dec_vae/output/model/vae-dec-model-2025-02-08-16-00"

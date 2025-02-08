@@ -136,7 +136,7 @@ def train(
         #     mode = offline_config.env_mode
 
 
-        eval_env_modes = [0, 1, 2, 3]
+        eval_env_modes = [0, 1]#, 2, 3]
         eval_env_func = make_env(
             config=eval_env_config,
             seed=batch,
