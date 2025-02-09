@@ -60,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--track",
         type=bool,
-        default=False,
+        default=True,
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
