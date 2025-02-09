@@ -90,20 +90,20 @@ def train(
             pbar.set_description(f"Training DT: {loss.item():.4f}")
 
             if offline_config.track:
-                tokens_seen = (
-                    (total_batches + 1)
-                    * offline_config.batch_size
-                    * model.transformer_config.n_ctx
-                )
-                learning_rate = optimizer.param_groups[0]["lr"]
+                # tokens_seen = (
+                #     (total_batches + 1)
+                #     * offline_config.batch_size
+                #     * model.transformer_config.n_ctx
+                # )
+                # learning_rate = optimizer.param_groups[0]["lr"]
                 wandb.log({"train/loss": loss.item()}, step=total_batches)
-                wandb.log(
-                    {"metrics/tokens_seen": tokens_seen}, step=total_batches
-                )
-                wandb.log(
-                    {"metrics/learning_rate": learning_rate},
-                    step=total_batches,
-                )
+                # wandb.log(
+                #     {"metrics/tokens_seen": tokens_seen}, step=total_batches
+                # )
+                # wandb.log(
+                #     {"metrics/learning_rate": learning_rate},
+                #     step=total_batches,
+                # )
 
         # # at test frequency
         if epoch % offline_config.test_frequency == 0:
@@ -117,34 +117,29 @@ def train(
                 mode_cond=offline_config.mode_conditioning
             )
 
-        eval_env_config = EnvironmentConfig(
-            capture_video=True,
-            max_steps=min(
-                model.environment_config.max_steps,
-                offline_config.eval_max_time_steps,
-            ),
-            fully_observed=False,
-            one_hot_obs=(trajectory_data_set.observation_type == "one_hot"),
-            view_size=env.observation_space["image"].shape[0]
-            if "image" in list(env.observation_space.keys())
-            else 7,
-        )
 
-        # if offline_config.mode_conditioning:
-        #     mode = 0
-        # else:
-        #     mode = offline_config.env_mode
-
-
-        eval_env_modes = [0, 1]#, 2, 3]
-        eval_env_func = make_env(
-            config=eval_env_config,
-            seed=batch,
-            idx=0,
-            run_name=f"dt_eval_videos_{batch}",
-            mode=eval_env_modes
-        )
         if epoch % offline_config.eval_frequency == 0:
+            eval_env_config = EnvironmentConfig(
+                capture_video=True,
+                max_steps=min(
+                    model.environment_config.max_steps,
+                    offline_config.eval_max_time_steps,
+                ),
+                fully_observed=False,
+                one_hot_obs=(trajectory_data_set.observation_type == "one_hot"),
+                view_size=env.observation_space["image"].shape[0]
+                if "image" in list(env.observation_space.keys())
+                else 7,
+            )
+
+            eval_env_modes = [0, 1]  # , 2, 3]
+            eval_env_func = make_env(
+                config=eval_env_config,
+                seed=batch,
+                idx=0,
+                run_name=f"dt_eval_videos_{batch}",
+                mode=eval_env_modes
+            )
             for rtg in offline_config.initial_rtg:
                 for mode in eval_env_modes:
 

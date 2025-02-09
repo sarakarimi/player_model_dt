@@ -413,9 +413,9 @@ class DecisionTransformer(TrajectoryTransformer):
             mode_embeddings = self.mode_embedding(mode.type(torch.float32))
             mode_stacked_inputs = mode_embeddings
             # mode_stacked_inputs = torch.stack((mode_embeddings, mode_embeddings, mode_embeddings), dim=1)
-            mode_stacked_inputs = mode_stacked_inputs.permute(0, 1, 2) #(0, 2, 1, 3)
-            mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 1, #3 * mode_seq_length,
-                                                              self.transformer_config.d_model)
+            # mode_stacked_inputs = mode_stacked_inputs.permute(0, 1, 2) #(0, 2, 1, 3)
+            # mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 1, #3 * mode_seq_length,
+            #                                                   self.transformer_config.d_model)
             # stacking the token_embeddings add mode
             token_embeddings = torch.cat((mode_stacked_inputs, token_embeddings), dim=1)
 

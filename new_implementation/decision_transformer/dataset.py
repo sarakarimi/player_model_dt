@@ -61,7 +61,7 @@ class TrajectoryDataset(Dataset):
         self.normalize_state = normalize_state
         self.rtg_scale = rtg_scale
         self.preprocess_observations = preprocess_observations
-        self.cluster_predictions, _ = predict_clusters()
+        # self.cluster_predictions, _ = predict_clusters()
         self.load_trajectories()
         self.mode = mode
 
@@ -83,7 +83,6 @@ class TrajectoryDataset(Dataset):
             truncated = data["data"].get("truncated")
             infos = data["data"].get("infos")
             # mode = np.zeros((int(len(dones) / (i + 1)), 8, len(self.trajectory_paths)))
-            # TODO chane to use DEC model
             # mode[:, :, i] = 1
             # modes = mode
 
@@ -151,6 +150,8 @@ class TrajectoryDataset(Dataset):
             self.timesteps = [
                 i for i, m in zip(self.timesteps, traj_len_mask) if m
             ]
+            self.modes = torch.zeros(len(self.actions), len(self.trajectory_paths))
+            self.modes[:, i] = 1
 
 
             # Filter out the nun optimal trajectories and then take 3500 sample out of each
@@ -203,16 +204,16 @@ class TrajectoryDataset(Dataset):
             merge_dones.extend(self.dones)
             merge_truncated.extend(self.truncated)
             merge_observations.extend(self.states)
-            # merge_modes.extend(self.modes)
+            merge_modes.extend(self.modes)
             merge_returns.extend(self.returns)
             merge_timesteps.extend(self.timesteps)
 
 
         # adding the clusters data from the pre-trained clustering model
-        assert len(self.cluster_predictions) == len(merge_actions), print(len(self.cluster_predictions),  len(merge_actions))
-        merge_modes = np.zeros((len(self.cluster_predictions), len(self.trajectory_paths)))
-        for i, pred in enumerate(self.cluster_predictions):
-            merge_modes[i][pred] = 1
+        # assert len(self.cluster_predictions) == len(merge_actions), print(len(self.cluster_predictions),  len(merge_actions))
+        # merge_modes = np.zeros((len(self.cluster_predictions), len(self.trajectory_paths)))
+        # for i, pred in enumerate(self.cluster_predictions):
+        #     merge_modes[i][pred] = 1
 
         self.actions = merge_actions
         self.rewards = merge_rewards
@@ -222,6 +223,7 @@ class TrajectoryDataset(Dataset):
         self.modes = merge_modes
         self.returns = merge_returns
         self.timesteps = merge_timesteps
+        print(self.modes[-1], self.modes[0])
 
         # unique, counts = np.unique(self.returns, return_counts=True)
         # print(unique, counts)
