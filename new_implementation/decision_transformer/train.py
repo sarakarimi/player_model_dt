@@ -17,12 +17,12 @@ from trajectory_transformer import (
 
 
 def train(
-    model: TrajectoryTransformer,
-    trajectory_data_set: TrajectoryDataset,
-    env,
-    make_env,
-    offline_config: OfflineTrainConfig,
-    device="cpu",
+        model: TrajectoryTransformer,
+        trajectory_data_set: TrajectoryDataset,
+        env,
+        make_env,
+        offline_config: OfflineTrainConfig,
+        device="cpu",
 ):
     loss_fn = nn.CrossEntropyLoss()
     model = model.to(device)
@@ -39,7 +39,7 @@ def train(
     # get total number of training steps.
     train_batches_per_epoch = len(train_dataloader)
     scheduler_config["training_steps"] = (
-        offline_config.train_epochs * train_batches_per_epoch
+            offline_config.train_epochs * train_batches_per_epoch
     )
     scheduler = get_scheduler(
         offline_config.scheduler, optimizer, **scheduler_config
@@ -117,7 +117,6 @@ def train(
                 mode_cond=offline_config.mode_conditioning
             )
 
-
         if epoch % offline_config.eval_frequency == 0:
             eval_env_config = EnvironmentConfig(
                 capture_video=True,
@@ -132,7 +131,7 @@ def train(
                 else 7,
             )
 
-            eval_env_modes = [0, 1]  # , 2, 3]
+            eval_env_modes = [0, 1, 2, 3]
             eval_env_func = make_env(
                 config=eval_env_config,
                 seed=batch,
@@ -142,7 +141,6 @@ def train(
             )
             for rtg in offline_config.initial_rtg:
                 for mode in eval_env_modes:
-
                     evaluate_dt_agent(
                         model=model,
                         env_func=eval_env_func,
@@ -160,13 +158,13 @@ def train(
 
 
 def test(
-    model: TrajectoryTransformer,
-    dataloader: DataLoader,
-    env,
-    epochs=10,
-    track=False,
-    batch_number=0,
-    mode_cond=False,
+        model: TrajectoryTransformer,
+        dataloader: DataLoader,
+        env,
+        epochs=10,
+        track=False,
+        batch_number=0,
+        mode_cond=False,
 ):
     model.eval()
 

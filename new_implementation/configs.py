@@ -46,7 +46,7 @@ class EnvironmentConfig:
     observation_space: None = None
     device: str = "cpu"
     env_mode: int = 0
-    num_modes: int = 2#4
+    num_modes: int = 4
 
     def __post_init__(self):
         # env = gym.make(self.env_id)
@@ -71,6 +71,7 @@ class EnvironmentConfig:
         )
         if isinstance(self.device, torch.device):
             self.device = str(self.device)
+        print(env.observation_space)
 
 
 @dataclass

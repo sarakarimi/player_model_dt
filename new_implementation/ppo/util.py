@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument(
         "--track",
         action="store_true",
-        default=True,
+        default=False,
         help="if toggled, this experiment will be tracked with Weights and Biases",
     )
     parser.add_argument(
@@ -154,13 +154,13 @@ def parse_args():
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/data/PPO_trajectories_metal-grid_camouflage.gz",
+        default="/home/sara/repositories/player_model_dt/data/PPO_trajectories_multigoal-goal-3-no-wrapper.gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(
         "--mode",
         type=int,
-        default=2,
+        default=3,
         help="the environment mode",
     )
     parser.add_argument(
@@ -172,7 +172,7 @@ def parse_args():
     parser.add_argument(
         "--one_hot_obs",
         action="store_true",
-        default=True,
+        default=False,
         help="if toggled, the environment will be partially observed one hot encoded",
     )
     parser.add_argument(

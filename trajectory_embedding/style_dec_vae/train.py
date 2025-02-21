@@ -247,12 +247,12 @@ if __name__ == '__main__':
     )
 
     # first pretrain the VAE with reconstruction loss
-    # pretrain(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
-    # train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
+    pretrain(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
+    train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
 
     # Evaluate trained model
-    dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-08-16-00"))
-    predicted, Z = evaluate(dec_cluster, gen_dataloader)
+    # dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-08-16-00"))
+    # predicted, Z = evaluate(dec_cluster, gen_dataloader)
 
 
 

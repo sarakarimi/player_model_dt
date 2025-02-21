@@ -132,6 +132,7 @@ def evaluate_dt_agent(
         )
 
         new_action = t.argmax(action_preds, dim=-1)[:, -1].squeeze(-1)
+        # print(modes, new_action)
 
         new_obs, new_reward, terminated, truncated, info = env.step(new_action)
 

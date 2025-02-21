@@ -77,9 +77,9 @@ class TrajectoryDataset(Dataset):
             dones = data["data"].get("dones")
             truncated = data["data"].get("truncated")
             infos = data["data"].get("infos")
-            mode = np.zeros((int(len(dones) / (i + 1)), 8, len(self.trajectory_paths)))
-            mode[:, :, i] = 1
-            modes = mode
+            # mode = np.zeros((int(len(dones) / (i + 1)), 8, len(self.trajectory_paths)))
+            # mode[:, :, i] = 1
+            # modes = mode
 
             # from collections import Counter
             # returns = ['%.2f' % r.sum() for r in rewards]
@@ -89,7 +89,7 @@ class TrajectoryDataset(Dataset):
             rewards = np.array(rewards)
             dones = np.array(dones)
             infos = np.array(infos, dtype=np.ndarray)
-            modes = np.array(modes)
+            # modes = np.array(modes)
 
             # check whether observations are flat or an image
             if observations.shape[-1] == 3:
@@ -114,7 +114,7 @@ class TrajectoryDataset(Dataset):
             t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
             t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
             t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
-            t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
+            # t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
             t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
             done_indices = torch.where(t_done_or_truncated)[0]
 
@@ -123,29 +123,13 @@ class TrajectoryDataset(Dataset):
             self.dones = torch.tensor_split(t_dones, done_indices + 1)
             self.truncated = torch.tensor_split(t_truncated, done_indices + 1)
             self.states = torch.tensor_split(t_observations, done_indices + 1)
-            self.modes = torch.tensor_split(t_modes, done_indices + 1)
+            # self.modes = torch.tensor_split(t_modes, done_indices + 1)
             self.returns = [r.sum() for r in self.rewards]
             self.returns = ['%.2f' % elem for elem in self.returns]
             # unique, counts = np.unique(self.returns, return_counts=True)
             # print(unique, counts)
             self.timesteps = [torch.arange(len(i)) for i in self.states]
-            self.traj_lens = np.array([len(i) for i in self.states])
 
-            # remove trajs with length 0
-            traj_len_mask = self.traj_lens > 0
-            self.actions = [i for i, m in zip(self.actions, traj_len_mask) if m]
-            self.rewards = [i for i, m in zip(self.rewards, traj_len_mask) if m]
-            self.dones = [i for i, m in zip(self.dones, traj_len_mask) if m]
-            self.truncated = [
-                i for i, m in zip(self.truncated, traj_len_mask) if m
-            ]
-            self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
-            self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
-            self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
-            self.timesteps = [
-                i for i, m in zip(self.timesteps, traj_len_mask) if m
-            ]
-            self.traj_lens = self.traj_lens[traj_len_mask]
 
             # Filter out un-optimal trajectories
             # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
@@ -154,20 +138,29 @@ class TrajectoryDataset(Dataset):
             # tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:])) * i)
 
             # Use mixed trajectories
-            obs.extend(self.states[:])
-            acts.extend(self.actions[:])
-            tasks.extend(np.ones(len(self.actions[:])) * i)
+            obs.extend(self.states)
+            acts.extend(self.actions)
+            tasks.extend(np.ones(len(self.actions)) * i)
 
             # unique, counts = np.unique(self.returns[:], return_counts=True)
             # print(unique, counts)
             # temp = [len(a) for a in self.actions[:]]
             # unique1, counts1 = np.unique(temp, return_counts=True)
             # print(unique1, counts1)
-
         self.obs = obs
         self.acts = acts
         self.tasks = tasks
-        # print(len(self.obs))
+
+        self.traj_lens = np.array([len(i) for i in self.obs])
+        # remove trajs with length 0
+        traj_len_mask = self.traj_lens > 0
+        self.acts = [i for i, m in zip(self.acts, traj_len_mask) if m]
+        self.obs = [i for i, m in zip(self.obs, traj_len_mask) if m]
+        # self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
+        self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
+
+        self.traj_lens = self.traj_lens[traj_len_mask]
+
 
 
     def get_indices_of_top_p_trajectories(self, pct_traj):

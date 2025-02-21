@@ -6,6 +6,7 @@ from typing import Callable
 import numpy as np
 import torch
 import plotly.express as px
+from exceptiongroup import catch
 from functorch.einops import rearrange
 from torch.utils.data import Dataset
 from minigrid.core.constants import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX
@@ -61,7 +62,7 @@ class TrajectoryDataset(Dataset):
         self.normalize_state = normalize_state
         self.rtg_scale = rtg_scale
         self.preprocess_observations = preprocess_observations
-        # self.cluster_predictions, _ = predict_clusters()
+        self.cluster_predictions, _ = predict_clusters()
         self.load_trajectories()
         self.mode = mode
 
@@ -134,68 +135,21 @@ class TrajectoryDataset(Dataset):
             # unique, counts = np.unique(self.returns, return_counts=True)
             # print(unique, counts)
             self.timesteps = [torch.arange(len(i)) for i in self.states]
-            self.traj_lens = np.array([len(i) for i in self.states])
 
-            # remove trajs with length 0
-            traj_len_mask = self.traj_lens > 0
-            self.actions = [i for i, m in zip(self.actions, traj_len_mask) if m]
-            self.rewards = [i for i, m in zip(self.rewards, traj_len_mask) if m]
-            self.dones = [i for i, m in zip(self.dones, traj_len_mask) if m]
-            self.truncated = [
-                i for i, m in zip(self.truncated, traj_len_mask) if m
-            ]
-            self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
-            # self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
-            self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
-            self.timesteps = [
-                i for i, m in zip(self.timesteps, traj_len_mask) if m
-            ]
-            self.modes = torch.zeros(len(self.actions), len(self.trajectory_paths))
-            self.modes[:, i] = 1
+            # self.modes = torch.zeros(len(self.actions), len(self.trajectory_paths))
+            # self.modes[:, i] = 1
 
 
-            # Filter out the nun optimal trajectories and then take 3500 sample out of each
-            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
-            # self.actions = [self.actions[i] for i in indexes][-3500:]
-            # self.rewards = [self.rewards[i] for i in indexes][-3500:]
-            # self.dones = [self.dones[i] for i in indexes][-3500:]
-            # self.truncated = [self.truncated[i] for i in indexes][-3500:]
-            # self.states = [self.states[i] for i in indexes][-3500:]
-            # self.returns = [self.returns[i] for i in indexes][-3500:]
-            # self.timesteps = [self.timesteps[i] for i in indexes][-3500:]
-
-            # Use mixed trajectories
-            self.actions = self.actions[:]
-            self.rewards = self.rewards[:]
-            self.dones = self.dones[:]
-            self.truncated = self.truncated[:]
-            self.states = self.states[:]
-            self.returns = self.returns[:]
-            self.timesteps = self.timesteps[:]
-
-
-
-            self.traj_lens = self.traj_lens[traj_len_mask]
-            self.num_timesteps = sum(self.traj_lens)
-            self.num_trajectories = len(self.states)
-
-            self.state_dim = list(self.states[0][0].shape)
-            self.act_dim = list(self.actions[0][0].shape)
-            self.max_ep_len = max([len(i) for i in self.states])
-            self.metadata = data["metadata"]
-
-            self.indices = self.get_indices_of_top_p_trajectories(self.pct_traj)
-            self.sampling_probabilities = self.get_sampling_probabilities()
-
-            if self.normalize_state:
-                self.state_mean, self.state_std = self.get_state_mean_std()
-            else:
-                self.state_mean = 0
-                self.state_std = 1
-
-            # TODO Make this way less hacky
-            if self.preprocess_observations == one_hot_encode_observation:
-                self.observation_type = "one_hot"
+            # Filter out the nun optimal trajectories and then take sample out of each
+            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.90]
+            # self.actions = [self.actions[i] for i in indexes][:]
+            # self.rewards = [self.rewards[i] for i in indexes][:]
+            # self.dones = [self.dones[i] for i in indexes][:]
+            # self.truncated = [self.truncated[i] for i in indexes][:]
+            # self.states = [self.states[i] for i in indexes][:]
+            # self.returns = [self.returns[i] for i in indexes][:]
+            # self.timesteps = [self.timesteps[i] for i in indexes][:]
+            # self.modes = [self.modes[i] for i in indexes][:]
 
 
             # merge datasets
@@ -204,26 +158,62 @@ class TrajectoryDataset(Dataset):
             merge_dones.extend(self.dones)
             merge_truncated.extend(self.truncated)
             merge_observations.extend(self.states)
-            merge_modes.extend(self.modes)
+            # merge_modes.extend(self.modes)
             merge_returns.extend(self.returns)
             merge_timesteps.extend(self.timesteps)
 
-
-        # adding the clusters data from the pre-trained clustering model
-        # assert len(self.cluster_predictions) == len(merge_actions), print(len(self.cluster_predictions),  len(merge_actions))
-        # merge_modes = np.zeros((len(self.cluster_predictions), len(self.trajectory_paths)))
-        # for i, pred in enumerate(self.cluster_predictions):
-        #     merge_modes[i][pred] = 1
 
         self.actions = merge_actions
         self.rewards = merge_rewards
         self.dones = merge_dones
         self.truncated = merge_truncated
         self.states = merge_observations
-        self.modes = merge_modes
         self.returns = merge_returns
         self.timesteps = merge_timesteps
-        print(self.modes[-1], self.modes[0])
+        # ==================================
+
+
+        self.traj_lens = np.array([len(i) for i in self.states])
+        # remove trajs with length 0
+        traj_len_mask = self.traj_lens > 0
+        self.actions = [i for i, m in zip(self.actions, traj_len_mask) if m]
+        self.rewards = [i for i, m in zip(self.rewards, traj_len_mask) if m]
+        self.dones = [i for i, m in zip(self.dones, traj_len_mask) if m]
+        self.truncated = [i for i, m in zip(self.truncated, traj_len_mask) if m]
+        self.states = [i for i, m in zip(self.states, traj_len_mask) if m]
+        self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
+        self.timesteps = [i for i, m in zip(self.timesteps, traj_len_mask) if m]
+
+        self.traj_lens = self.traj_lens[traj_len_mask]
+        self.num_timesteps = sum(self.traj_lens)
+        self.num_trajectories = len(self.states)
+
+        self.state_dim = list(self.states[0][0].shape)
+        self.act_dim = list(self.actions[0][0].shape)
+        self.max_ep_len = max([len(i) for i in self.states])
+        self.metadata = data["metadata"]
+
+        self.indices = self.get_indices_of_top_p_trajectories(self.pct_traj)
+        self.sampling_probabilities = self.get_sampling_probabilities()
+
+        if self.normalize_state:
+            self.state_mean, self.state_std = self.get_state_mean_std()
+        else:
+            self.state_mean = 0
+            self.state_std = 1
+
+        # TODO Make this way less hacky
+        if self.preprocess_observations == one_hot_encode_observation:
+            self.observation_type = "one_hot"
+
+        # adding the clusters data from the pre-trained clustering model
+        assert len(self.cluster_predictions) == len(self.returns), print(len(self.cluster_predictions),
+                                                                         len(self.returns))
+        merge_modes = np.zeros((len(merge_observations), len(self.trajectory_paths)))
+        for i, pred in enumerate(self.cluster_predictions):
+            merge_modes[i][pred] = 1
+        self.modes = merge_modes
+        self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
 
         # unique, counts = np.unique(self.returns, return_counts=True)
         # print(unique, counts)
@@ -232,6 +222,8 @@ class TrajectoryDataset(Dataset):
         # print(unique1, counts1)
         # unique2, counts2 = np.unique(self.cluster_predictions, return_counts=True)
         # print(unique2, counts2)
+
+
 
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
@@ -368,7 +360,10 @@ class TrajectoryDataset(Dataset):
         rtg = rtg / self.rtg_scale
 
         if self.mode:
-            traj_modes = self.modes[traj_index]
+            try:
+                traj_modes = self.modes[traj_index]
+            except IndexError:
+                print(len(self.modes), traj_index)
             modes = traj_modes.reshape(1, -1)
             # modes = self.add_padding(modes, -10, padding_required)
             if isinstance(modes, torch.Tensor):
@@ -531,10 +526,10 @@ def one_hot_encode_observation(img: torch.Tensor) -> torch.Tensor:
 
 if __name__ == '__main__':
     paths = [
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal0.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal1.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
-        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-0.gz",
+        "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-1.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal2.gz",
+        # "/home/sara/repositories/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_goal3.gz",
 
     ]
     trajectory_data_set = TrajectoryDataset(trajectory_paths=paths)

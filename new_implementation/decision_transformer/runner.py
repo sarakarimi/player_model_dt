@@ -48,6 +48,7 @@ def run_decision_transformer(
         mode=offline_config.mode_conditioning
     )
 
+
     # make an environment
     trajectory_data_set.metadata["args"]["env_id"] = "MiniGrid-double-goal"
     env_id = trajectory_data_set.metadata["args"]["env_id"]
@@ -127,7 +128,7 @@ def run_decision_transformer(
         artifact = wandb.Artifact(run_name, type="model")
         artifact.add_file(model_path)
         wandb.log_artifact(artifact)
-        os.remove(model_path)
+        # os.remove(model_path)
 
         wandb.finish()
 

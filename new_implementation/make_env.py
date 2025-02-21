@@ -9,7 +9,7 @@ from new_implementation.configs import EnvironmentConfig
 # from envs.double_goal_minigrid import DoubleGoalEnv
 
 
-def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode: int = 1):
+def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode: int):
     """Return a function that returns an environment after setting up boilerplate."""
 
     # only one of fully observed or flat one hot can be true.

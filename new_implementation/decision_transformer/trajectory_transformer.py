@@ -302,9 +302,8 @@ class DecisionTransformer(TrajectoryTransformer):
         self.reward_embedding = nn.Sequential(
             nn.Linear(1, self.transformer_config.d_model, bias=False)
         )
-        self.mode_embedding = nn.Sequential(
-            nn.Linear(environment_config.num_modes, self.transformer_config.d_model, bias=False)
-        )
+        self.mode_embedding = nn.Linear(environment_config.num_modes, self.transformer_config.d_model, bias=False)
+
         self.reward_predictor = nn.Linear(self.transformer_config.d_model, 1)
 
         # n_ctx include full timesteps except for the last where it doesn't know the action
@@ -409,15 +408,17 @@ class DecisionTransformer(TrajectoryTransformer):
         )
         if mode is not None:
             # batch_size, seq_length = states.shape[0], states.shape[1]
-            mode_seq_length = 1 #mode.shape[1]
+            # mode_seq_length = mode.shape[1]
             mode_embeddings = self.mode_embedding(mode.type(torch.float32))
             mode_stacked_inputs = mode_embeddings
             # mode_stacked_inputs = torch.stack((mode_embeddings, mode_embeddings, mode_embeddings), dim=1)
-            # mode_stacked_inputs = mode_stacked_inputs.permute(0, 1, 2) #(0, 2, 1, 3)
-            # mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 1, #3 * mode_seq_length,
+            # mode_stacked_inputs = mode_stacked_inputs.permute(0, 2, 1, 3)
+            # mode_stacked_inputs = mode_stacked_inputs.reshape(mode.shape[0], 3 * mode_seq_length,
             #                                                   self.transformer_config.d_model)
+
             # stacking the token_embeddings add mode
             token_embeddings = torch.cat((mode_stacked_inputs, token_embeddings), dim=1)
+            # print(mode.shape, states.shape, actions.shape, rtgs.shape, timesteps.shape, token_embeddings.shape, mode_embeddings.shape, mode_stacked_inputs.shape)
 
         return token_embeddings
 
@@ -514,6 +515,11 @@ class DecisionTransformer(TrajectoryTransformer):
         timesteps = timesteps.to(device=self.device)
         mode = mode.to(device=self.device) if mode is not None else None
         # embed states and recast back to (batch, block_size, n_embd)
+
+        # batch_mode_percentage = [1 for m in mode if m[0][0] == 0.]
+        # batch_mode_percentage = sum(batch_mode_percentage) / len(mode)
+        # print("BATCH MODE PERCENTAGE", batch_mode_percentage)
+
         token_embeddings = self.to_tokens(states, actions, rtgs, timesteps, mode)
         x = self.transformer(token_embeddings)
         state_preds, action_preds, reward_preds = self.get_logits(
