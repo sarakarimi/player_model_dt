@@ -9,7 +9,7 @@ from style_vae import *
 from style_dec import *
 from trajectory_embedding.style_dec_vae.eval import evaluate
 from trajectory_embedding.style_dec_vae.utils.dataset import MiniGridDataset, collate_fn
-from trajectory_embedding.style_dec_vae.utils.utils import cluster_accuracy
+from trajectory_embedding.style_dec_vae.utils.utils import cluster_accuracy, eval_gmm_accuracy
 import torch.nn.functional as F
 from config import *
 torch.autograd.set_detect_anomaly(True)
@@ -118,6 +118,11 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
         print('VAE resconstruction loss: ', total_loss / iters)
         # steplr.step()
 
+        if pre_epoch + 1 % 50 == 0:
+            accuracy = eval_gmm_accuracy(model, device, val_dataloader)
+            if accuracy >= 90:
+                break
+
     model.encoder.sampling.log_var.load_state_dict(model.encoder.sampling.mu.state_dict())
 
     model.eval()
@@ -125,8 +130,8 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
     Y = []
     with torch.no_grad():
         for x, labels, lengths in val_dataloader:
-            h_0 = torch.zeros(1, train_dataloader.batch_size, model.hidden_size).to(device)
-            c_0 = torch.zeros(1, train_dataloader.batch_size, model.hidden_size).to(device)
+            h_0 = torch.zeros(1, val_dataloader.batch_size, model.hidden_size).to(device)
+            c_0 = torch.zeros(1, val_dataloader.batch_size, model.hidden_size).to(device)
             hidden_enc = (h_0, c_0)
 
             x = x.to(torch.float32).to(device)
@@ -247,11 +252,12 @@ if __name__ == '__main__':
     )
 
     # first pretrain the VAE with reconstruction loss
-    pretrain(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
-    train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
+    # pretrain(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
+    # train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
 
     # Evaluate trained model
-    # dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-08-16-00"))
+    dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-20-14-45"))
+    print(dec_cluster.mu_c.data)
     # predicted, Z = evaluate(dec_cluster, gen_dataloader)
 
 

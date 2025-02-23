@@ -54,6 +54,40 @@ def cluster_accuracy(predicted: np.array, target: np.array):
     return sum([w[i, j] for i, j in zip(ind_1, ind_2)]) * 1.0 / predicted.size, w
 
 
+def eval_gmm_accuracy(model, device, val_dataloader):
+    model.eval()
+    Z = []
+    Y = []
+    with torch.no_grad():
+        for x, labels, lengths in val_dataloader:
+            h_0 = torch.zeros(1, val_dataloader.batch_size, model.hidden_size).to(device)
+            c_0 = torch.zeros(1, val_dataloader.batch_size, model.hidden_size).to(device)
+            hidden_enc = (h_0, c_0)
+
+            x = x.to(torch.float32).to(device)
+            labels = labels.to(device)
+            lengths = lengths.to(torch.int64) #.to(device)
+
+
+            z, mu, log_var, _ = model.encoder(x, lengths, hidden_enc)
+            # hidden_enc = hidden_enc[0].detach(), hidden_enc[1].detach()
+
+            assert F.mse_loss(mu, log_var) == 0
+            Z.append(mu)
+            Y.append(labels)
+
+    Z = torch.cat(Z, 0).detach().cpu().numpy()
+    Y = torch.cat(Y, 0).to(torch.int32).detach().cpu().numpy()
+
+    gmm = GaussianMixture(n_components=model.n_centroids, random_state=100, max_iter=1000, covariance_type='diag')
+    predict = gmm.fit_predict(Z)
+
+    accuracy = cluster_accuracy(predict, Y)[0] * 100
+    print('Accuracy = {:.4f}%'.format(accuracy))
+
+    return accuracy
+
+
 def plot_embeddings(gtruth, Z, model_predictions):
     embedding_data = []
     for embedding, task, gtruth_task in zip(Z, model_predictions, gtruth):
