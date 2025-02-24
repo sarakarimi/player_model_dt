@@ -120,8 +120,8 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
 
         if pre_epoch % 1 == 0:
             accuracy = eval_gmm_accuracy(model, device, val_dataloader)
-            if accuracy >= 90:
-                break
+            # if accuracy >= 90:
+            #     break
 
     model.encoder.sampling.log_var.load_state_dict(model.encoder.sampling.mu.state_dict())
 

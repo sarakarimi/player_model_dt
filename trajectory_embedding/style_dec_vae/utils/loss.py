@@ -42,6 +42,6 @@ class MiniGridLoss(_Loss):
         # part_3_loss = criterion(input[:, :, 17:20], target[:, :, 17:20])
         # loss = torch.cat([part_1_loss, part_2_loss, part_3_loss], dim=-1)
         loss = criterion(input, target)
-        loss = loss.mean() #* 500
+        loss = loss.sum() #* 500
         # loss /= 500
         return loss
