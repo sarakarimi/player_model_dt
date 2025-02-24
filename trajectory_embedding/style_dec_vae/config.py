@@ -2,7 +2,7 @@
 dimensions = [25, 128, 10]
 model_params = {
     'decoder_final_activation': 'relu',
-    'pretrained_epochs': 200,
+    'pretrained_epochs': 50,
     'epochs': 50,
     'save_path': 'output/model'
 }
