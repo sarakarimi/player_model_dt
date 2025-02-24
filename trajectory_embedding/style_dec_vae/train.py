@@ -118,7 +118,7 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
         print('VAE resconstruction loss: ', total_loss / iters)
         # steplr.step()
 
-        if pre_epoch + 1 % 50 == 0:
+        if pre_epoch % 1 == 0:
             accuracy = eval_gmm_accuracy(model, device, val_dataloader)
             if accuracy >= 90:
                 break

@@ -1,12 +1,12 @@
 # Hyperparameters
-dimensions = [75, 128, 10]
+dimensions = [25, 128, 10]
 model_params = {
     'decoder_final_activation': 'relu',
-    'pretrained_epochs': 500,
+    'pretrained_epochs': 200,
     'epochs': 50,
     'save_path': 'output/model'
 }
-batch_size = 200  # 64
+batch_size = 256  # 64
 n_clusters = 4
 alpha = 1
 

@@ -93,6 +93,8 @@ class TrajectoryDataset(Dataset):
 
             # check whether observations are flat or an image
             if observations.shape[-1] == 3:
+                # use state space that includes  object IDX in each grid position
+                observations = observations[:, :, :, :, 0]
                 self.observation_type = "index"
             elif observations.shape[-1] == 20:
                 self.observation_type = "one_hot"
@@ -102,8 +104,12 @@ class TrajectoryDataset(Dataset):
                     observations.shape,
                 )
             if self.observation_type != "flat":
+                # t_observations = rearrange(
+                #     torch.tensor(observations), "t b h w c -> (b t) (h w c)"  # "t b h w c -> (b t) h w c"
+                # )
+                # use state space that includes  object IDX in each grid position
                 t_observations = rearrange(
-                    torch.tensor(observations), "t b h w c -> (b t) (h w c)"  # "t b h w c -> (b t) h w c"
+                    torch.tensor(observations), "t b h w  -> (b t) (h w)"
                 )
             else:
                 t_observations = rearrange(
@@ -160,6 +166,7 @@ class TrajectoryDataset(Dataset):
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
 
         self.traj_lens = self.traj_lens[traj_len_mask]
+        # self.state_mean, self.state_std = self.get_state_mean_std()
 
 
 

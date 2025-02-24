@@ -72,7 +72,7 @@ def eval_gmm_accuracy(model, device, val_dataloader):
             z, mu, log_var, _ = model.encoder(x, lengths, hidden_enc)
             # hidden_enc = hidden_enc[0].detach(), hidden_enc[1].detach()
 
-            assert F.mse_loss(mu, log_var) == 0
+            # assert F.mse_loss(mu, log_var) == 0, print(mu, log_var)
             Z.append(mu)
             Y.append(labels)
 
