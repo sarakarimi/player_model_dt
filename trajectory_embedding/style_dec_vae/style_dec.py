@@ -56,7 +56,7 @@ class ClusteringBasedVAE(nn.Module):
         z, mu, logvar, hidden_enc = self.encoder(x, seq_lengths, hidden_enc)
 
         for l in range(L):
-            z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
+            # z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
 
             x_decoded, _ = self.decoder(z, seq_lengths)
 
@@ -69,16 +69,16 @@ class ClusteringBasedVAE(nn.Module):
             else:
                 res_loss = 0
                 for i, length in enumerate(seq_lengths):
-                    res_loss += self.custom_loss_fn(x_decoded[i, :length], x[i, :length])
-                res_loss /= len(seq_lengths) #* x.size(-1)
+                    res_loss += self.custom_loss_fn(x_decoded[i, :length], x[i, :length], reduction='sum') / length
+                # res_loss /= len(seq_lengths) #* x.size(-1)
 
         res_loss /= L
-        loss = self.alpha * res_loss #* x.size(-1)
+        res_loss = self.alpha * res_loss * x.size(-1)
 
-        pi = self.pi
+        pi = self.pi + 1e-9
         log_sigma2_c = self.log_sigma_c
         mu_c = self.mu_c
-        z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
+        # z = torch.randn_like(mu) * torch.exp(logvar / 2) + mu
 
         # calculate the p(z|c) or gamma
         pcz = torch.exp(torch.log(pi.unsqueeze(0)) + self.gaussian_pdfs_log(z, mu_c, log_sigma2_c)) + det
@@ -87,18 +87,18 @@ class ClusteringBasedVAE(nn.Module):
         # calculating the KL losses
         kl_loss_1 =  0.5 * torch.sum(pcz * torch.sum(log_sigma2_c.unsqueeze(0) +
                                                            torch.exp(logvar.unsqueeze(1) - log_sigma2_c.unsqueeze(0)) +
-                                                           (mu.unsqueeze(1) - mu_c.unsqueeze(0)) ** 2 / torch.exp(log_sigma2_c.unsqueeze(0)), 2), 1)
+                                                           (mu.unsqueeze(1) - mu_c.unsqueeze(0)) ** 2 / torch.exp(log_sigma2_c.unsqueeze(0)), 2))
 
-        kl_loss_2 = -torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz)), 1)
+        kl_loss_2 = -torch.sum(pcz * torch.log(pi.unsqueeze(0) / (pcz + 1e-9)))
 
-        kl_loss_3 = -0.5 * torch.sum(1 + logvar, 1)
+        kl_loss_3 = -0.5 * torch.sum(1 + logvar)
 
-        kl_loss_1 = kl_loss_1.mean()
-        kl_loss_2 = kl_loss_2.mean()
-        kl_loss_3 = kl_loss_3.mean()
-        loss = loss + kl_loss_1 + kl_loss_2 + kl_loss_3
-
-        return loss, res_loss, kl_loss_1, kl_loss_2 + kl_loss_3, hidden_enc
+        kl_loss_1 = kl_loss_1 #.mean()
+        kl_loss_2 = kl_loss_2#.mean()
+        kl_loss_3 = kl_loss_3#.mean()
+        loss = res_loss + kl_loss_1 + kl_loss_2 + kl_loss_3
+        loss /= x.size(0)
+        return loss, res_loss /x.size(0), kl_loss_1 / x.size(0), (kl_loss_2 + kl_loss_3)/ x.size(0), hidden_enc
 
 
 

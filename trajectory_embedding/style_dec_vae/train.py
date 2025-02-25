@@ -103,8 +103,10 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
             recons_loss = 0
             for i, length in enumerate(lengths):
                 # recons_loss += nn.functional.mse_loss(x_decoded[i, :length], x[i, :length], reduction='sum')
-                recons_loss += loss_fn(x_decoded[i, :length], x[i, :length])
+                recons_loss += loss_fn(x_decoded[i, :length], x[i, :length], reduction='mean')
+            # mean over batch
             recons_loss /= len(lengths)
+
 
             total_loss += recons_loss.detach().cpu().numpy()
 
