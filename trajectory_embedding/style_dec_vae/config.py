@@ -2,8 +2,8 @@
 dimensions = [25, 128, 10]
 model_params = {
     'decoder_final_activation': 'relu',
-    'pretrained_epochs': 50,
-    'epochs': 50,
+    'pretrained_epochs': 10, #50
+    'epochs': 200,
     'save_path': 'output/model'
 }
 batch_size = 256  # 64

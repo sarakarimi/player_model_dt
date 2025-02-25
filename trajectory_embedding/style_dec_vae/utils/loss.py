@@ -15,10 +15,10 @@ class MiniGridLoss(_Loss):
          The one hot observation wrapper converts observations into 3 one-hot encoded parts and concatenates them to each other!
          """
 
-        input = input.view(-1, 25, 10)
-        input = input.view(-1, 10)
-        target = target.view(-1).to(torch.int64)
-        criterion = nn.CrossEntropyLoss(reduction='none')
+        # input = input.view(-1, 25, 10)
+        # input = input.view(-1, 10)
+        # target = target.view(-1).to(torch.int64)
+        criterion = nn.MSELoss(reduction='none')
 
         # class_1_loss = F.nll_loss(
         #     F.log_softmax(input[:, :, 0:11] + 1e-8, dim=2).view(-1, 11),

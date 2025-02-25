@@ -161,7 +161,9 @@ class TrajectoryDataset(Dataset):
         # remove trajs with length 0
         traj_len_mask = self.traj_lens > 0
         self.acts = [i for i, m in zip(self.acts, traj_len_mask) if m]
-        self.obs = [i for i, m in zip(self.obs, traj_len_mask) if m]
+
+        # TODO make it less hacky! I divided by 9 to normalize the obs
+        self.obs = [i/9 for i, m in zip(self.obs, traj_len_mask) if m]
         # self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
 
@@ -205,7 +207,7 @@ class TrajectoryDataset(Dataset):
 
     def get_state_mean_std(self):
         # used for input normalization
-        all_states = np.concatenate(self.states, axis=0)
+        all_states = np.concatenate(self.obs, axis=0)
         state_mean, state_std = (
             np.mean(all_states, axis=0),
             np.std(all_states, axis=0) + 1e-6,
@@ -404,6 +406,7 @@ class MiniGridDataset(TrajectoryDataset):
 
     def __getitem__(self, idx):
         sequence = self.sequences[idx]
+        # sequence = (sequence - self.state_mean) / self.state_std
         labels = self.labels[idx]
         length = len(sequence)
         return sequence, labels, length

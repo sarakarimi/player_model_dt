@@ -52,9 +52,9 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
 
         print('VAE resconstruction loss: ', total_loss / iters)
 
-        # print("pi", model.pi.data)
-        # print("mean", model.mu_c.data)
-        # print("sigma", model.log_sigma_c.data)
+        print("pi", model.pi.data)
+        print("mean", model.mu_c.data)
+        print("sigma", model.log_sigma_c.data)
 
         return
     else:
@@ -250,7 +250,6 @@ if __name__ == '__main__':
     gen_dataloader = torch.utils.data.DataLoader(
         dataset=trajectory_data_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-
     # first pretrain the VAE with reconstruction loss
     pretrain(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
     train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)

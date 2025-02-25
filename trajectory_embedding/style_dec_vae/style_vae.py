@@ -157,7 +157,7 @@ class Decoder(nn.Module):
             bidirectional=False,
         )
         self.fc1 = nn.Linear(self.latent_size, self.hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 250) # used to be input_size
+        self.fc2 = nn.Linear(hidden_size, input_size) # used to be input_size
 
     def forward(self, z, lengths, total_padding_length=None):
         max_seq_len = max(lengths)
