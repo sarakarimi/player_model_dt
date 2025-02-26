@@ -47,7 +47,6 @@ def cluster_accuracy(predicted: np.array, target: np.array):
 
     D = max(predicted.max(), target.max()) + 1
     w = np.zeros((D, D), dtype=np.int64)
-
     for i in range(predicted.size):
         w[predicted[i], target[i]] += 1
     ind_1, ind_2 = linear_sum_assignment(w.max() - w)

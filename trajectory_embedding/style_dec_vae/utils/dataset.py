@@ -8,6 +8,8 @@ import torch.nn as nn
 from einops import rearrange
 from torch.utils.data import Dataset
 import numpy as np
+from triton.language import dtype
+
 
 class TrajectoryReader:
     """
@@ -138,21 +140,21 @@ class TrajectoryDataset(Dataset):
 
 
             # Filter out un-optimal trajectories
-            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
-            # obs.extend([self.states[i] for i in indexes][-3500:])
-            # acts.extend([self.actions[i] for i in indexes][-3500:])
-            # tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:])) * i)
+            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.95]
+            # obs.extend([self.states[i] for i in indexes][:])
+            # acts.extend([self.actions[i] for i in indexes][:])
+            # tasks.extend(np.ones(len([self.actions[i] for i in indexes][:]), dtype=np.int64) * i)
 
             # Use mixed trajectories
-            obs.extend(self.states)
-            acts.extend(self.actions)
-            tasks.extend(np.ones(len(self.actions)) * i)
+            obs.extend(self.states[:-4])
+            acts.extend(self.actions[:-4])
+            tasks.extend(np.ones(len(self.actions[:-4]), dtype=np.int64) * i)
 
             # unique, counts = np.unique(self.returns[:], return_counts=True)
             # print(unique, counts)
-            # temp = [len(a) for a in self.actions[:]]
-            # unique1, counts1 = np.unique(temp, return_counts=True)
-            # print(unique1, counts1)
+        temp = [len(a) for a in acts]
+        unique1, counts1 = np.unique(temp, return_counts=True)
+        print(unique1, counts1, len(acts))
         self.obs = obs
         self.acts = acts
         self.tasks = tasks
@@ -415,4 +417,5 @@ def collate_fn(batch):
     # Separate sequences and their lengths
     sequences, labels, lengths = zip(*batch)
     sequences_padded = nn.utils.rnn.pad_sequence(sequences, batch_first=True, padding_value=0)
+    sequences_padded = sequences_padded.float()
     return sequences_padded, torch.tensor(labels), torch.tensor(lengths)
