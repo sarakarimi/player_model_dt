@@ -291,7 +291,7 @@ def train_TransformerVAE(
             # zero out padded positions
             mse_per_step = mse_per_step.masked_fill(pad_mask, 0.0)
             # average over actual (non-pad) positions
-            rec_loss = mse_per_step.sum() / (~pad_mask).sum()  # or 'mean over entire batch'
+            rec_loss = mse_per_step.sum() / batch_data.size(0) #(~pad_mask).sum()  # or 'mean over entire batch'
 
             kl = calc_kl(mu, logvar, reduction='mean')
             loss = rec_loss + beta * kl
