@@ -119,7 +119,7 @@ class TrainerVaDE:
         preds = self.gmm.fit_predict(Z)
         acc = cluster_accuracy(np.array(preds), np.array(y_true))
         print('Testing AE... Acc: {}'.format( acc[0]))
-        # plot_embeddings(y_true, Z, preds)
+        plot_embeddings(y_true, Z, preds)
 
     def save_weights_for_VaDE(self):
         """Saving the pretrained weights for the encoder, decoder, pi, mu, var.
@@ -242,8 +242,7 @@ class TrainerVaDE:
 
         # loss = log_p_x_given_z + log_p_z_given_c - log_p_c + log_q_c_given_x - log_q_z_given_x
         # loss /= x.size(0)
-        return loss, log_p_x_given_z, log_p_z_given_c / x.size(0), - log_p_c / x.size(
-            0), log_q_c_given_x / x.size(0), - log_q_z_given_x / x.size(0)
+        return loss, log_p_x_given_z, log_p_z_given_c.mean(), - log_p_c.mean(), log_q_c_given_x.mean(), - log_q_z_given_x.mean()
 
     def compute_gamma(self, z, p_c):
         h = (z.unsqueeze(1) - self.VaDE.mu_prior).pow(2) / self.VaDE.log_var_prior.exp()
