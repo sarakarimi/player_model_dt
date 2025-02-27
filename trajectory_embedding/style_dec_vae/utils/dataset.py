@@ -96,9 +96,10 @@ class TrajectoryDataset(Dataset):
             # check whether observations are flat or an image
             if observations.shape[-1] == 3:
                 # use state space that includes  object IDX in each grid position
-                observations = observations[:, :, :, :, 0]
+                # observations = observations[:, :, :, :, 0]
                 self.observation_type = "index"
             elif observations.shape[-1] == 20:
+                observations = observations[:, :, :, :, 0:11]
                 self.observation_type = "one_hot"
             else:
                 raise ValueError(
@@ -106,13 +107,13 @@ class TrajectoryDataset(Dataset):
                     observations.shape,
                 )
             if self.observation_type != "flat":
-                # t_observations = rearrange(
-                #     torch.tensor(observations), "t b h w c -> (b t) (h w c)"  # "t b h w c -> (b t) h w c"
-                # )
-                # use state space that includes  object IDX in each grid position
                 t_observations = rearrange(
-                    torch.tensor(observations), "t b h w  -> (b t) (h w)"
+                    torch.tensor(observations), "t b h w c -> (b t) (h w c)"  # "t b h w c -> (b t) h w c"
                 )
+                # use state space that includes  object IDX in each grid position
+                # t_observations = rearrange(
+                #     torch.tensor(observations), "t b h w  -> (b t) (h w)"
+                # )
             else:
                 t_observations = rearrange(
                     torch.tensor(observations), "t b f -> (b t) f"
@@ -140,15 +141,15 @@ class TrajectoryDataset(Dataset):
 
 
             # Filter out un-optimal trajectories
-            # indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.95]
-            # obs.extend([self.states[i] for i in indexes][:])
-            # acts.extend([self.actions[i] for i in indexes][:])
-            # tasks.extend(np.ones(len([self.actions[i] for i in indexes][:]), dtype=np.int64) * i)
+            indexes = [index for index, (state, ret) in enumerate(zip(self.states, self.returns)) if float(ret) >= 0.98]
+            obs.extend([self.states[i] for i in indexes][-3500:])
+            acts.extend([self.actions[i] for i in indexes][-3500:])
+            tasks.extend(np.ones(len([self.actions[i] for i in indexes][-3500:]), dtype=np.int64) * i)
 
             # Use mixed trajectories
-            obs.extend(self.states[:-4])
-            acts.extend(self.actions[:-4])
-            tasks.extend(np.ones(len(self.actions[:-4]), dtype=np.int64) * i)
+            # obs.extend(self.states[:-4])
+            # acts.extend(self.actions[:-4])
+            # tasks.extend(np.ones(len(self.actions[:-4]), dtype=np.int64) * i)
 
             # unique, counts = np.unique(self.returns[:], return_counts=True)
             # print(unique, counts)
@@ -165,7 +166,7 @@ class TrajectoryDataset(Dataset):
         self.acts = [i for i, m in zip(self.acts, traj_len_mask) if m]
 
         # TODO make it less hacky! I divided by 9 to normalize the obs
-        self.obs = [i/9 for i, m in zip(self.obs, traj_len_mask) if m]
+        self.obs = [i for i, m in zip(self.obs, traj_len_mask) if m]
         # self.modes = [i for i, m in zip(self.modes, traj_len_mask) if m]
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
 

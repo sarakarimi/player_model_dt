@@ -103,7 +103,7 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
             recons_loss = 0
             for i, length in enumerate(lengths):
                 # recons_loss += nn.functional.mse_loss(x_decoded[i, :length], x[i, :length], reduction='sum')
-                recons_loss += loss_fn(x_decoded[i, :length], x[i, :length], reduction='mean')
+                recons_loss += loss_fn(x_decoded[i, :length], x[i, :length], reduction='sum')
             # mean over batch
             recons_loss /= len(lengths)
 
@@ -120,7 +120,7 @@ def pretrain(model: ClusteringBasedVAE, train_dataloader, val_dataloader, **para
         print('VAE resconstruction loss: ', total_loss / iters)
         # steplr.step()
 
-        if pre_epoch % 1 == 0:
+        if pre_epoch % 10 == 0:
             accuracy = eval_gmm_accuracy(model, device, val_dataloader)
             # if accuracy >= 90:
             #     break
@@ -257,7 +257,7 @@ if __name__ == '__main__':
     train(dec_cluster, gen_dataloader, gen_dataloader, **model_params)
 
     # Evaluate trained model
-    # dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-02-20-14-45"))
+    # dec_cluster.load_state_dict(torch.load("output/model/vae-dec-model-2025-01-08-13-25"))
     # print(dec_cluster.mu_c.data)
     # predicted, Z = evaluate(dec_cluster, gen_dataloader)
 
