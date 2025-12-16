@@ -105,15 +105,15 @@ def plot_embeddings(gtruth, Z, model_predictions):
         hue="tasks",
         data=df_fig,
     )
-    # plt.show()
-    plt.savefig('tsne1.png')
+    plt.show()
+    # plt.savefig('tsne1.png')
     sns.scatterplot(
         x="tsne-2d-one", y="tsne-2d-two",
         hue="task_ground_truth",
         data=df_fig,
     )
-    plt.savefig('tsne2.png')
-    # plt.show()
+    # plt.savefig('tsne2.png')
+    plt.show()
 
 
 def plot_grad_flow(named_parameters):

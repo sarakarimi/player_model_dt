@@ -48,25 +48,25 @@ class Agent(Entity):
             if check_valid_position(new_position, env_state, agent_check=True):
                 self.position = new_position
 
-        elif action == AgentAction.PICK_UP:  # Pick Up
-            pickup_position = self.position + DIRECTIONS[self.direction]
-            for item in env_state.items:
-                if np.array_equal(item.position, pickup_position) and item.is_picked_up == False:
-                    logger.log_item_used(item.item_type)
-                    self.state = item.pickup()
-                    self.set_color()
-                    self.item = item
-                    break
-
-        elif action == AgentAction.DROP_DOWN:  # Drop Down
-            if self.item is not None:
-                drop_position = self.position + DIRECTIONS[self.direction]
-                if check_valid_position(drop_position, env_state, agent_check=True):
-                    logger.log_item_dropped(self.item.item_type)
-                    for item in env_state.items:
-                        if np.array_equal(item.item_type, self.item.item_type) and item.is_picked_up == True:
-                            self.state = item.drop(drop_position)
-                            self.set_color()
+        # elif action == AgentAction.PICK_UP:  # Pick Up
+        #     pickup_position = self.position + DIRECTIONS[self.direction]
+        #     for item in env_state.items:
+        #         if np.array_equal(item.position, pickup_position) and item.is_picked_up == False:
+        #             logger.log_item_used(item.item_type)
+        #             self.state = item.pickup()
+        #             self.set_color()
+        #             self.item = item
+        #             break
+        #
+        # elif action == AgentAction.DROP_DOWN:  # Drop Down
+        #     if self.item is not None:
+        #         drop_position = self.position + DIRECTIONS[self.direction]
+        #         if check_valid_position(drop_position, env_state, agent_check=True):
+        #             logger.log_item_dropped(self.item.item_type)
+        #             for item in env_state.items:
+        #                 if np.array_equal(item.item_type, self.item.item_type) and item.is_picked_up == True:
+        #                     self.state = item.drop(drop_position)
+        #                     self.set_color()
                 
 
         elif action == AgentAction.ATTACK:  # Attack

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from enum import IntEnum
 from typing import Tuple, Union, SupportsFloat, Any, List
-import numpy as np
 from gymnasium import spaces
 from gymnasium.core import ActType, ObsType
 from minigrid.core.grid import Grid
@@ -13,7 +12,9 @@ import pygame
 from gymnasium import Env
 
 from minigrid.core.actions import Actions
-from minigrid.minigrid_env import MiniGridEnv
+from minigrid.wrappers import SymbolicObsWrapper
+
+# from envs.old.minigrid_wrappers import SymbolicPartialObsWrapper
 
 """
 
@@ -58,7 +59,8 @@ class MultiGoalManualControl:
                     self.key_handler(event)
 
     def step(self, action: Actions):
-        _, reward, terminated, truncated, _ = self.env.step(action)
+        s, reward, terminated, truncated, _ = self.env.step(action)
+        print(s['image'].shape, s['image'].tolist())
         print(f"step={self.env.step_count}, reward={reward:.2f}")
 
         if terminated:
@@ -109,7 +111,7 @@ class SimpleActions(IntEnum):
 class MultiGoalEnv(MiniGridEnv):
     def __init__(
         self,
-        size: int = 25,
+        size: int = 7,
         num_goals: int = 1,
         select_id_goal: Union[int, List[int]] = 0,
         agent_start_pos: Union[Tuple[int, int], None] = None,
@@ -125,7 +127,7 @@ class MultiGoalEnv(MiniGridEnv):
             mission_space=mission_space,
             grid_size=size,
             see_through_walls=True,
-            agent_view_size=9,
+            agent_view_size=3,
             max_steps=max_steps,
             **kwargs,
         )
@@ -203,7 +205,7 @@ class MultiGoalEnv(MiniGridEnv):
         reward = 0
         terminated = False
         truncated = False
-        self.agent_dir = 0
+        # self.agent_dir = 0
 
         # Move up
         if action == self.actions.up:
@@ -247,9 +249,10 @@ class MultiGoalEnv(MiniGridEnv):
 def main() -> None:
 
 
-    env = MultiGoalEnv(render_mode="human", 
+    env = MultiGoalEnv(render_mode="human",
                        num_goals = 8,       # Maximum number of goals is 8
                        select_id_goal = [0, 1, 2, 3])
+
 
     # enable manual control for testing
     manual_control = MultiGoalManualControl(env, seed=42)

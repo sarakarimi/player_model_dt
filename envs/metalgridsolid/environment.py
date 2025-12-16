@@ -130,7 +130,7 @@ class MetalGridSolidEnv(gym.Env):
             raise ValueError(f"Unknown observation mode: {self.observation_mode}")
         
         # Define action space
-        self.action_space = spaces.Discrete(6)  # 0: Rotate Left, 1: Rotate Right, 2: Move Forward, 3: Pick Up, 4: Drop Down, 5: Attack
+        self.action_space = spaces.Discrete(4)  # 0: Rotate Left, 1: Rotate Right, 2: Move Forward, 3: Pick Up, 4: Drop Down, 5: Attack
 
         # Create Environment State
         self.env_state = EnvState(agent=self.agent,
@@ -141,18 +141,7 @@ class MetalGridSolidEnv(gym.Env):
                              obstacle=self.obstacles.position,
                              map=[self.height, self.width])
         
-        # Define action space
-        self.action_space = spaces.Discrete(6)  # 0: Rotate Left, 1: Rotate Right, 2: Move Forward, 3: Pick Up, 4: Drop Down, 5: Attack
 
-        # Create Environment State
-        self.env_state = EnvState(agent=self.agent,
-                             enemies=self.enemies,
-                             items=self.items,
-                             ground=self.ground.position,
-                             vents=self.vents.position,
-                             obstacle=self.obstacles.position,
-                             map=[self.height, self.width])
-        
 
         # Create Logger
         self.logger = Logger()

@@ -44,8 +44,10 @@ def metal_grid_env():
     agent = Agent(position=(1, 1), direction=2)
 
     # Define enemies
-    enemies = [PatrollingEnemy(position=(3, 1), direction=1),
-               StandingEnemy(position=(10, 9), direction=3)]
+    enemies = [
+        PatrollingEnemy(position=(3, 1), direction=1),
+               StandingEnemy(position=(10, 9), direction=3)
+    ]
 
     # Define goal position
     goal = (13, 7)
@@ -54,13 +56,15 @@ def metal_grid_env():
     obstacles = [(9, 9)]
 
     # Define items
-    items = [Camouflage(position=(1, 9))]
+    items = [
+        # Camouflage(position=(1, 9))
+    ]
 
     # Reward weigths
     rw_weights = {
         'goal': 1.0,  # Standard weight for reaching the goal
         'takedown': 0.0,  # No weight for enemies killed
-        'camouflage': 0.0  # No weight for using the camouflage
+        # 'camouflage': 0.0  # No weight for using the camouflage
     }
     # Define max steps of the environment
     max_steps = 100
@@ -72,7 +76,10 @@ def metal_grid_env():
     # Create the environment
     metal_env = MetalGridSolidEnv(agent=agent,
                             enemies=enemies,
-                            vents=[vent_l, vent_r],
+                            vents=[
+                                # vent_l,
+                                vent_r
+                            ],
                             items=items,
                             grid_size=grid_size,
                             walls=walls,
@@ -116,6 +123,8 @@ if __name__ == "__main__":
 
                 if action is not None:
                     obs, reward, done, truncated, info = env.step(action)
+                    print(obs)
+                    print(reward)
                     finish = done or truncated
 
         env.render()

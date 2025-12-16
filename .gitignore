@@ -1,5 +1,5 @@
 1/
-data/
+datasets/
 trained_models/
 *__pycache__/
 gifs/
@@ -32,7 +32,7 @@ player_model_dt.egg-info/dependency_links.txt
 player_model_dt.egg-info/PKG-INFO
 player_model_dt.egg-info/SOURCES.txt
 player_model_dt.egg-info/top_level.txt
-trajectory_embedding/style_dec_vae/model
+trained_models/minigrid_model
 trajectory_embedding/style_dec_vae/output
 trajectory_embedding/style_dec_vae/checkpoints
 

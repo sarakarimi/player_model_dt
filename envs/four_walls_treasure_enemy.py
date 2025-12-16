@@ -66,8 +66,8 @@ class FourRoomsTreasureEnemyEnv(MiniGridDungeonEnv):
                 agent_pos=None,
                 goal_pos=None,
                 max_steps=100,
-                reward_treasure: bool = True,
-                reward_enemy: bool = True,
+                reward_treasure: bool = False,
+                reward_enemy: bool = False,
                 **kwargs):
         
         self._agent_default_pos = agent_pos

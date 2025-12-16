@@ -23,9 +23,9 @@ class AgentAction:
     LEFT: int = 1
     RIGHT: int = 2
     FORWARD: int = 3
-    PICK_UP: int = 4
-    DROP_DOWN: int = 5
-    ATTACK: int = 6
+    # PICK_UP: int = 4
+    # DROP_DOWN: int = 5
+    ATTACK: int = 4 #6
 
 @dataclass(frozen=True)
 class EnemyState:
