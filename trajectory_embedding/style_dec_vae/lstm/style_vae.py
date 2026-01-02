@@ -431,9 +431,9 @@ def validate(model, test_loader, load_model=False, model_path=None):
     # Plot trained embeddings
     true_labels = np.concatenate(labels_list, 0)
     Z = np.concatenate(Z, 0)
-    predicted_labels, cluster_centroids = cluster_latents(Z, 3)
-    plot_embeddings(gtruth=predicted_labels, Z=Z, label_name='task_predicted')
-    plot_embeddings(gtruth=true_labels, Z=Z, label_name='task_ground_truth')
+    predicted_labels, cluster_centroids = cluster_latents(Z, n_clusters)
+    # plot_embeddings(gtruth=predicted_labels, Z=Z, label_name='task_predicted')
+    # plot_embeddings(gtruth=true_labels, Z=Z, label_name='task_ground_truth')
 
     return predicted_labels, Z, cluster_centroids
 

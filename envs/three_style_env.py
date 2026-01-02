@@ -113,6 +113,16 @@ class MiniGridThreeStyles(MiniGridEnv):
             easy_env: bool = True,  # easy 3 style env with no pillars and simple layout
             **kwargs
     ):
+
+        # TODO remove
+        self.weapon_picked = False
+        self.weapon_dropped = False
+        self.object_pickup_bonus = 0.0
+        self.killing_bonus = 0.0
+        self.in_exposure_with_camouflage = False
+        self.camouflage_picked = False
+        self.camouflage_dropped = False
+
         self.size = size
         self.easy_env = easy_env
         if not self.easy_env:
@@ -131,7 +141,7 @@ class MiniGridThreeStyles(MiniGridEnv):
 
         # NEW: end immediately on detection (and optional penalty)
         self.end_on_detection: bool = True
-        self.detection_penalty: float = -1.0  # set to e.g. -1.0 if you want a penalty
+        self.detection_penalty: float = 0.0 #-0.2 #-1.0  # set to e.g. -1.0 if you want a penalty
 
         # --- simple style config (NO modes) ---
         if self.easy_env:
@@ -143,10 +153,10 @@ class MiniGridThreeStyles(MiniGridEnv):
         self.non_target_penalty: float = non_target_penalty
 
         # defaults when no target_style is specified
-        self.weapon_bonus = 0.3
-        self.camouflage_bonus = 0.3  # Similar to weapon
-        self.backstab_bonus = 0.3
-        self.bypass_bonus = 0.0
+        self.weapon_bonus = 0.6
+        self.camouflage_bonus = 0.6  # Similar to weapon
+        self.backstab_bonus = 0.6
+        self.bypass_bonus = 0.6
 
         # Set valid styles and bonuses per mode
         if self.easy_env:
@@ -159,6 +169,7 @@ class MiniGridThreeStyles(MiniGridEnv):
             defaults.update(style_bonuses)
         self.style_bonuses = defaults
 
+
     @staticmethod
     def _gen_mission() -> str:
         return "three_style_policy"
@@ -167,6 +178,15 @@ class MiniGridThreeStyles(MiniGridEnv):
         return Grid(width, height)
 
     def _gen_grid(self, width, height):
+        # TODO remove
+        self.weapon_picked = False
+        self.weapon_dropped = False
+        self.object_pickup_bonus = 0.0
+        self.killing_bonus = 0.0
+        self.in_exposure_with_camouflage = False
+        self.camouflage_picked = False
+        self.camouflage_dropped = False
+
         self.grid = self._create_grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
 
@@ -194,12 +214,12 @@ class MiniGridThreeStyles(MiniGridEnv):
         if self.easy_env:
             wx, wy = 2, 1
         else:
-            wx, wy = 3, 3
+            wx, wy = 3, 5
         self.put_obj(Weapon(), wx, wy)
 
         # Place Camouflage
         if not self.easy_env:
-            self.put_obj(Camouflage(), 1, 1)  # Add this line
+            self.put_obj(Camouflage(), 1, 3)  # Add this line
 
         # Optionally add some walls to make routing interesting but not forced
         # (Keep simple; you can tweak as needed)
@@ -213,7 +233,7 @@ class MiniGridThreeStyles(MiniGridEnv):
                 self.put_obj(Wall(), px, py + 1)
 
         # Place agent
-        self.place_agent(top=(1, height // 2), size=(1, 1))
+        self.place_agent(top=(1, height // 2 + 2), size=(1, 1))
 
         self.detected = False
         self.style_used = None
@@ -223,6 +243,7 @@ class MiniGridThreeStyles(MiniGridEnv):
             "(3) pick up weapon and toggle to defeat enemy."
         )
 
+
     # --- Helpers --------------------------------------------------------------
 
     def _achieved_style(self) -> str:
@@ -230,10 +251,8 @@ class MiniGridThreeStyles(MiniGridEnv):
         if not self.easy_env:
             if self.style_used is not None:
                 return self.style_used
-            if self.enemy_alive and self._agent_has_camouflage() and self.agent_pos == self.goal_pos:
+            if self.enemy_alive and self._agent_has_camouflage() and self.agent_pos == self.goal_pos and self.in_exposure_with_camouflage:
                 return "camouflage"
-            if self.enemy_alive:
-                return "bypass"
             # fallback
             return "bypass"
         else:
@@ -267,10 +286,10 @@ class MiniGridThreeStyles(MiniGridEnv):
         ax, ay = agent_pos
 
         # Rectangle: from (ex, ey) to (ex+3, ey-5)
-        in_x = ex <= ax <= ex + 3
-        in_y = ey - 5 <= ay <= ey - 1
+        in_x = ex <= ax <= ex + 4
+        in_y = ey - 5 <= ay <= ey
 
-        return in_x and in_y
+        return in_x and in_y and (ax, ay) != self.goal_pos
 
     def _is_adjacent(self, a: Tuple[int, int], b: Tuple[int, int]) -> bool:
         return abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
@@ -297,14 +316,43 @@ class MiniGridThreeStyles(MiniGridEnv):
     def _agent_has_camouflage(self) -> bool:
         return self.carrying is not None and isinstance(self.carrying, Camouflage)
 
-    # ---- Reward function ----------------------------------------------------
-
-
-
     # --- Step override --------------------------------------------------------
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
+        reward -= 0.005  # step penalty: comment out for Bypass mode or camouflage longer paths
+
+        # TODO remove Weapon pickup/drop tracking for rewards/penalties
+        has_weapon = self._agent_has_weapon()
+        # pickup reward (first time only)
+        if (not self.weapon_picked) and has_weapon:
+            reward += 0.2 if self.target_style == "weapon" else 0.0
+            self.weapon_picked = True
+            self.weapon_dropped = False
+
+        # drop penalty (first drop after pickup, only once)
+        if self.weapon_picked and (not has_weapon) and (not self.weapon_dropped):
+            reward -= 0.2 if self.target_style == "weapon" else 0.0
+            self.weapon_dropped = True
+
+
+        # TODO remove Camouflage pickup/drop tracking for rewards/penalties
+        has_camouflage = self._agent_has_camouflage()
+        if (not self.camouflage_picked) and has_camouflage:
+
+            reward += 0.2 if self.target_style == "camouflage" else 0.0
+            self.camouflage_picked = True
+            self.camouflage_dropped = False
+        if self.camouflage_picked and (not has_camouflage) and (not self.camouflage_dropped):
+            reward -= 0.2 if self.target_style == "camouflage" else 0.0
+            self.camouflage_dropped = True
+        # Update exposure flag
+        if has_camouflage and self.is_in_custom_enemy_box(self.agent_pos):
+            self.in_exposure_with_camouflage = True
+        else:
+            if self.agent_pos != self.goal_pos:
+                self.in_exposure_with_camouflage = False
+
 
         if self.easy_env:
             enemy_exposure_function = self._is_in_enemy_front_tile
@@ -346,13 +394,14 @@ class MiniGridThreeStyles(MiniGridEnv):
                     info["enemy_alive"] = self.enemy_alive
                     return obs, reward, terminated, truncated, info
 
-            # Handle toggling near enemy for backstab/weapon
+            # Handle toggling near enemy for weapon
             if action == self.actions.toggle and self.enemy_alive and self.enemy_pos:
                 if self._is_adjacent(self.agent_pos, self.enemy_pos):
                     if self._agent_has_weapon():
                         # weapon attack from any adjacent tile
                         self._remove_enemy("weapon")
-
+                        if self.target_style == "weapon":
+                            reward += 0.2
 
         # If we reached the goal, decide style if not already set
         info = dict(info)
@@ -377,6 +426,7 @@ class MiniGridThreeStyles(MiniGridEnv):
             info["total_reward"] = reward
             return obs, reward, terminated, truncated, info
 
+
         info["style"] = self.style_used
         info["detected"] = self.detected
         info["enemy_alive"] = self.enemy_alive
@@ -396,11 +446,10 @@ if __name__ == '__main__':
     register_env()
     import gymnasium as gym
 
-    env = gym.make("MiniGrid-ThreeStyles-v0", target_style="camouflage", target_bonus=0.6, non_target_penalty=-0.6,
-                   render_mode="human", easy_env=False)
+    env = gym.make("MiniGrid-ThreeStyles-v0", target_style="bypass", target_bonus=1.0, non_target_penalty=-1.0,
+                   render_mode="human", easy_env=False, max_steps=100)
     obs, _ = env.reset()
-    print(obs['image'].shape)
-
+    ret = 0.0
     finish = False
     while not finish:
         for event in pygame.event.get():
@@ -427,10 +476,11 @@ if __name__ == '__main__':
 
                 if action is not None:
                     obs, reward, done, truncated, info = env.step(action)
-                    print(obs['image'])
+                    ret += reward
                     print(info)
                     print(reward)
                     finish = done or truncated
+                print(ret)
 
         env.render()
         env.clock.tick(10)

@@ -125,7 +125,8 @@ class TrajectoryDataset(Dataset):
             # modes[:, i] = 1
 
             # Sampling trajectories based on their lengths and returns
-            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=2)
+            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=5)
+            print(top_seq_lengths)
             seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
 
             if self.sampling:  # Use random sampled trajectories
@@ -214,7 +215,6 @@ class TrajectoryDataset(Dataset):
 
         # top_seq_lengths = self.get_top_trajectory_lengths(self.states, self.returns, top_k=6)
         # print(top_seq_lengths)
-
 
     @staticmethod
     def get_top_trajectory_lengths(states, returns, top_k=5):

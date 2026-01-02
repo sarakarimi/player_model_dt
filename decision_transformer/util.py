@@ -25,13 +25,12 @@ def parse_args():
 
     parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--trajectory_paths", nargs='+', default=[
-        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-0-no-wrapper.gz",
-        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-1-no-wrapper.gz",
-        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-2-no-wrapper.gz",
-        # "/home/sara_karimi/player_model_dt/trajectory_embedding/datasets/minigrid/PPO_trajectories_multigoal-goal-3-no-wrapper.gz",
-        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_backstab.gz",
-        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_bypass.gz",
-        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_weapon.gz",
+        # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_backstab.gz",
+        # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_bypass.gz",
+        # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_weapon.gz",
+        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_bypass.gz",
+        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_weapon.gz",
+        "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_camouflage.gz",
 
     ])  # required=True)
     parser.add_argument("--n_heads", type=int, default=2)
@@ -40,7 +39,7 @@ def parse_args():
     parser.add_argument("--gated_mlp", action=argparse.BooleanOptionalAction)
     parser.add_argument("--n_layers", type=int, default=1)
     parser.add_argument("--n_ctx", type=int, default=14)
-    parser.add_argument("--prompt_len", type=int, default=4) # PDT works best with ctx 14 and prompt len 4 but style-DT works fine witg even ctx of 8 but better with 11
+    parser.add_argument("--prompt_len", type=int, default=4) # PDT works best with ctx 14 and prompt len 4 but style-DT works fine with even ctx of 8 but better with 11
     parser.add_argument("--layer_norm", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--train_epochs", type=int, default=5000)

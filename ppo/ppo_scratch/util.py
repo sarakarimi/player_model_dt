@@ -7,14 +7,9 @@ import torch
 from configs import ConfigJsonEncoder
 import torch as t
 
-# import syncvectorenv
 
-MAIN = __name__ == "__main__"
-
-Arr = np.ndarray
-ObsType = np.ndarray
-ActType = int
-MODE = "weapon"
+MODE = "camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+EASY_ENV = False
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -25,7 +20,7 @@ def parse_args():
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="three_style_env_" + MODE,
+        default="three_style_env_" + MODE if EASY_ENV else "three_style_env_hard_" + MODE,
         help="the name of this experiment",
     )
     parser.add_argument(
@@ -79,7 +74,7 @@ def parse_args():
     parser.add_argument(
         "--total_timesteps",
         type=int,
-        default=400000,
+        default=600000,
         help="the total number of timesteps to train for",
     )
     parser.add_argument(
@@ -118,7 +113,7 @@ def parse_args():
     parser.add_argument(
         "--num_minibatches",
         type=int,
-        default=4,
+        default=64, # 4
         help="the number of mini batches",
     )
     parser.add_argument(
@@ -137,7 +132,7 @@ def parse_args():
         "--vf_coef", type=float, default=0.5, help="value loss coefficient"
     )
     parser.add_argument(
-        "--ent_coef", type=float, default=0.01, help="entropy term coefficient"
+        "--ent_coef", type=float, default=0.012, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01
     )
     parser.add_argument(
         "--max_grad_norm",
@@ -148,13 +143,13 @@ def parse_args():
     parser.add_argument(
         "--max_steps",
         type=int,
-        default=1000,
+        default=100,
         help="the maximum number of steps total",
     )
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_new/PPO_trajectories_three_style_env_" + MODE + ".gz",
+        default="/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_" + MODE + ".gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(
@@ -166,7 +161,7 @@ def parse_args():
     parser.add_argument(
         "--easy_env",
         action="store_true",
-        default=True,
+        default=EASY_ENV,
         help="use the easy version of the environment",
     )
     parser.add_argument(

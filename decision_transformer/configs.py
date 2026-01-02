@@ -46,7 +46,7 @@ class EnvironmentConfig:
     action_space: None = None
     observation_space: None = None
     device: str = "cpu"
-    env_styles = ["backstab", "bypass", "weapon"]
+    env_styles = ["bypass", "weapon", "camouflage"] #["backstab", "bypass", "weapon"]
     style_vector_size: int =  64 # size of style vector
 
     def __post_init__(self):

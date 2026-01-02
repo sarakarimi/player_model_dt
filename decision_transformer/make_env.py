@@ -26,8 +26,8 @@ def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode
         # env = DoubleGoalEnv(mode=mode, agent_start_pos=None, agent_pov=config.view_size, **kwargs)
         # env = MultiGoalEnv(num_goals=8, select_id_goal=mode, **kwargs) #0, 1, 2, 3
         # env = metal_grid_env()
-        env = MiniGridThreeStyles(render_mode=config.render_mode, target_style=mode, target_bonus=0.6, non_target_penalty=-0.1, agent_view_size=3)
-        # env = MiniGridThreeStyles(render_mode=config.render_mode, target_style=None, style_bonuses={"bypass":0.2, "backstab":0.3, "weapon":0.3})
+        # env = MiniGridThreeStyles(render_mode=config.render_mode, target_style=mode, target_bonus=0.6, non_target_penalty=-0.1, agent_view_size=3)
+        env = MiniGridThreeStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, easy_env=False, **kwargs)
 
 
         env = gym.wrappers.RecordEpisodeStatistics(env)

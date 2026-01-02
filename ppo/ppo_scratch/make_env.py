@@ -26,7 +26,7 @@ def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode
         # env = DoubleGoalEnv(mode=mode, agent_start_pos=None, agent_pov=config.view_size, **kwargs)
         # env = MultiGoalEnv(num_goals=8, select_id_goal=mode, **kwargs) #0, 1, 2, 3
         # env = metal_grid_env()
-        env = MiniGridThreeStyles(target_style=mode, target_bonus=0.6, non_target_penalty=-0.1, easy_env=easy_env, **kwargs)
+        env = MiniGridThreeStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, easy_env=easy_env, **kwargs)
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if config.capture_video and idx == 0:
