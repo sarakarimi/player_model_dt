@@ -19,16 +19,16 @@ dataset_params = {
     'action_normalization_factor': 6
 }
 
-# VAE Model config
+# VAE LSTM Model config
 vae_model_params = {
     'input_size': 9 + 1, # 20 #500  # Number of features in each timestep
     'hidden_size': 256, # 20
-    'latent_size': 64, # 10  # 64 looks ok for mujoco
+    'latent_size': 32, # 10  # 64 looks ok for mujoco
 }
-num_epochs = 12 # 7 for easy env, 12 for hard env
+num_epochs = 15 # 7 for easy env, 15 for hard env with kl_weight of 0.00025, with 100 epochs kl of 0.03 works
 vae_batch_size = 128
 
-vae_model_save_path = '/home/sara/repositories/player_model_dt/trained_models/minigrid_model/style_vae/three_style_env_hard_trained_model.pth'
+vae_model_save_path = '/home/sara/repositories/player_model_dt/trained_models/minigrid_model/style_vae/three_style_env_hard_lstm_model.pth'
 
 
 paths = [

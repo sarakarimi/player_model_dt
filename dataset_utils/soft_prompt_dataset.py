@@ -9,6 +9,7 @@ class SoftPromptDataset(TrajectoryDataset):
     def __init__(
             self,
             trajectory_paths,
+            vae_model_type,
             vae_model_path,
             vae_model_parameters,
             max_len=1,
@@ -33,6 +34,7 @@ class SoftPromptDataset(TrajectoryDataset):
 
         self.vae_model_path = vae_model_path
         self.vae_model_parameters = vae_model_parameters
+        self.vae_model_type = vae_model_type
         self.cluster_predictions, self.style_vectors, self.cluster_centroids = self.predict_clusters_using_saved_model()
 
     def predict_clusters_using_saved_model(self):
@@ -45,7 +47,8 @@ class SoftPromptDataset(TrajectoryDataset):
         }
         model_path = self.vae_model_path
         model_parameters = self.vae_model_parameters
-        cluster_predictions, style_vectors, cluster_centroids = predict_clusters_vae(model_path, model_parameters,
+        vae_model_type = self.vae_model_type
+        cluster_predictions, style_vectors, cluster_centroids = predict_clusters_vae(vae_model_type, model_path, model_parameters,
                                                                                      dataset_paths,
                                                                                      dataset_parameters, batch_size=128)
         return cluster_predictions, style_vectors, cluster_centroids

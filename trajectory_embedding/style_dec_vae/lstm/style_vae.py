@@ -369,7 +369,7 @@ def train(model, train_loader, test_loader, epochs, save_path=None):
 
             train_iterator.set_postfix({"train_loss": float(mloss.mean())})
 
-    validate(model, test_loader)
+    lstm_validate(model, test_loader)
 
     # Save the trained model
     assert save_path is not None, "Please provide a valid path to save the model."
@@ -379,7 +379,7 @@ def train(model, train_loader, test_loader, epochs, save_path=None):
     return model
 
 
-def validate(model, test_loader, load_model=False, model_path=None):
+def lstm_validate(model, test_loader, load_model=False, model_path=None):
     if load_model:
         model.load_state_dict(torch.load(model_path, map_location='cpu'))
         model.eval()
@@ -432,8 +432,8 @@ def validate(model, test_loader, load_model=False, model_path=None):
     true_labels = np.concatenate(labels_list, 0)
     Z = np.concatenate(Z, 0)
     predicted_labels, cluster_centroids = cluster_latents(Z, n_clusters)
-    # plot_embeddings(gtruth=predicted_labels, Z=Z, label_name='task_predicted')
-    # plot_embeddings(gtruth=true_labels, Z=Z, label_name='task_ground_truth')
+    plot_embeddings(gtruth=predicted_labels, Z=Z, label_name='task_predicted')
+    plot_embeddings(gtruth=true_labels, Z=Z, label_name='task_ground_truth')
 
     return predicted_labels, Z, cluster_centroids
 
