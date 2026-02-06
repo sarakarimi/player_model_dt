@@ -1,20 +1,3 @@
-"""
-Style-VAE + Decision Transformer for MiniGrid (Conditional Prior on Designer Controls).
-
-This is your code with minimal, mechanical changes:
-- Dataset returns `controls` (designer style controls) per trajectory
-- Model has ConditionalPrior p(z | controls) instead of standard Normal prior
-- KL uses KL(q(z|traj) || p(z|controls))
-- Online eval samples z from p(z|controls) (no need for reference trajectory)
-
-Controls (example, 5 dims):
-  [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
-All should be float32 in [0,1].
-
-IMPORTANT:
-You need to provide `self.controls[traj_index]` in the dataset.
-If you only have 3 discrete styles today, map them to fixed control vectors (example mapping below).
-"""
 
 import random
 from typing import Callable, Tuple, Dict, Optional
@@ -82,12 +65,11 @@ class MiniGridDataset(TrajectoryDataset):
         self.control_dim = control_dim
 
         # ---------------------------------------------------------------------
-        # You said designers will provide controls at inference.
+        # designers will provide controls at inference.
         # For training, each trajectory must have a control vector.
         # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
         #
-        # If you currently only have 3 styles, you can map each style label
-        # to a fixed control vector (this is a reasonable starting point).
+        # With 3 styles, I map each style label to a fixed control vector
         # ---------------------------------------------------------------------
         style_to_controls = {
             0: np.array([0.10, 0.10, 0.60, 0.90, 0.60], dtype=np.float32),  # bypass
@@ -96,7 +78,7 @@ class MiniGridDataset(TrajectoryDataset):
         }
 
 
-        # If you already have controls stored, replace this whole block with your actual data.
+        # TODO If I already have controls stored, replace this whole block with my actual data.
         self.controls = []
         for traj_i in range(len(self.states)):
             label = int(self.tasks[traj_i])
@@ -266,7 +248,8 @@ class ConditionalPrior(nn.Module):
 
 
 # =============================================================================
-# Decision Transformer (unchanged)
+# Decision Transformer
+# Code taken from the Prompt-dt repository
 # =============================================================================
 
 class DecisionTransformer(nn.Module):
@@ -485,7 +468,7 @@ class StyleVAEPromptDT(nn.Module):
         full_actions: torch.Tensor,
         full_timesteps: torch.Tensor,
         full_attention_mask: torch.Tensor,
-        controls: torch.Tensor,              # <-- NEW: [B, control_dim]
+        controls: torch.Tensor,
         states: torch.Tensor,
         actions: torch.Tensor,
         returns_to_go: torch.Tensor,
@@ -566,9 +549,8 @@ def evaluate_online_controls(
     # style id -> env target style name (only for spawning env variants)
     style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
 
-    # If your dataset contains per-trajectory controls already, we can choose
-    # a representative c for each style by sampling from dataset controls.
-    # Fallback: use a fixed mapping (same as training mapping you used).
+    # TODO make the  dataset contain per-trajectory controls so I can choose a representative c for each style by sampling from dataset controls.
+    # TODO for now I use a fixed mapping (same as training mapping).
     fallback_style_to_controls = {
         0: np.array([0.10, 0.10, 0.60, 0.90, 0.60], dtype=np.float32),  # bypass
         1: np.array([0.70, 0.90, 0.20, 0.30, 0.80], dtype=np.float32),  # weapon
@@ -577,16 +559,15 @@ def evaluate_online_controls(
 
     results = {style_id: [] for style_id in range(num_styles)}
 
-    # Precompute state normalization tensors
+    # state normalization tensors
     state_mean = torch.tensor(dataset.state_mean, device=device, dtype=torch.float32)
     state_std = torch.tensor(dataset.state_std, device=device, dtype=torch.float32)
 
     with torch.no_grad():
         for style_id in range(num_styles):
-            # --- pick a control vector c for this eval style ---
             c = None
 
-            # If dataset provides controls aligned with each trajectory:
+            # TODO: fix this sampling approach
             if hasattr(dataset, "controls") and dataset.controls is not None:
                 # sample one trajectory index of this style and take its controls
                 style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
@@ -598,13 +579,13 @@ def evaluate_online_controls(
             if c is None:
                 c = fallback_style_to_controls[style_id]
 
-            controls = torch.tensor(c, dtype=torch.float32, device=device).unsqueeze(0)  # [1, control_dim]
+            controls = torch.tensor(c, dtype=torch.float32, device=device).unsqueeze(0)
 
-            # --- sample z from prior p(z|controls) ---
-            z = model.sample_z_from_prior(controls, deterministic=deterministic_prior)  # [1, latent_dim]
-            style_tokens = model.latent_to_style_tokens(z)  # [1, 3, H]
+            # sample z from prior given controls
+            z = model.sample_z_from_prior(controls, deterministic=deterministic_prior)
+            style_tokens = model.latent_to_style_tokens(z)
 
-            # --- rollout episodes ---
+            # rollout episodes
             for ep in range(num_episodes_per_style):
                 env = MiniGridThreeStyles(
                     target_style=style_names[style_id],
@@ -621,10 +602,10 @@ def evaluate_online_controls(
                 state = torch.from_numpy(obs["image"][:, :, 0].flatten()).float().to(device)
                 state = (state - state_mean) / state_std
 
-                states = state.reshape(1, 1, -1)  # [1, 1, state_dim]
-                actions = torch.zeros((1, 1, 1), dtype=torch.long, device=device)  # [1, 1, 1]
-                rtgs = torch.tensor([[[initial_rtg]]], dtype=torch.float32, device=device)  # [1, 1, 1]
-                timesteps = torch.tensor([[0]], dtype=torch.long, device=device)  # [1, 1]
+                states = state.reshape(1, 1, -1)
+                actions = torch.zeros((1, 1, 1), dtype=torch.long, device=device)
+                rtgs = torch.tensor([[[initial_rtg]]], dtype=torch.float32, device=device)
+                timesteps = torch.tensor([[0]], dtype=torch.long, device=device)
 
                 episode_return = 0.0
                 done = False
