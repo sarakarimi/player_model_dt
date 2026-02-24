@@ -6,7 +6,6 @@ wandb/
 video/
 videos/
 *.pt
-*.gz
 *.zip
 *.hdf5
 /official_implementation/vector_obs/model_saved
