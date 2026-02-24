@@ -68,6 +68,7 @@ class TrajectoryDataset(Dataset):
             # modes = mode
 
             observations = np.array(observations)
+            T_steps, B_envs = observations.shape[0], observations.shape[1]
             actions = np.array(actions)
             rewards = np.array(rewards)
             dones = np.array(dones)
@@ -112,6 +113,24 @@ class TrajectoryDataset(Dataset):
             t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
             done_indices = torch.where(t_done_or_truncated)[0]
 
+            # Extract the terminal info dict for each trajectory.
+            # With gymnasium SyncVectorEnv, terminal infos live under info["final_info"][b].
+            raw_terminal_infos = []
+            if infos is not None:
+                for flat_idx in done_indices.numpy():
+                    t_step = int(flat_idx) % T_steps
+                    b_env = int(flat_idx) // T_steps
+                    ep_info = {}
+                    step_info = infos[t_step]
+                    if isinstance(step_info, dict) and "final_info" in step_info:
+                        fi = step_info["final_info"]
+                        if fi is not None and b_env < len(fi) and fi[b_env] is not None:
+                            ep_info = fi[b_env] if isinstance(fi[b_env], dict) else {}
+                    raw_terminal_infos.append(ep_info)
+                raw_terminal_infos.append({})  # sentinel for the trailing empty segment
+            else:
+                raw_terminal_infos = [{} for _ in range(len(done_indices) + 1)]
+
             actions = torch.tensor_split(t_actions, done_indices + 1)
             rewards = torch.tensor_split(t_rewards, done_indices + 1)
             dones = torch.tensor_split(t_dones, done_indices + 1)
@@ -125,26 +144,28 @@ class TrajectoryDataset(Dataset):
             # modes[:, i] = 1
 
             # Sampling trajectories based on their lengths and returns
-            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=5)
+            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=7)
             print(top_seq_lengths)
             seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
 
             if self.sampling:  # Use random sampled trajectories
                 indexes = []
+                index_lists = []
                 # TODO remove hard-coded values
                 num_samples = 1000
                 for seq_len in seq_lens:
                     index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
                                   len(state) == seq_len]
-                    if len(index_list) < num_samples:
-                        num_samples = len(index_list)
-                    index_list_sample = random.sample(index_list, num_samples)
-                    indexes.extend(index_list_sample)
+                    index_lists.extend(index_list)
+                index_list_sample = random.sample(index_lists, num_samples)
+                indexes.extend(index_list_sample)
 
             else:  # Use non-random trajectories
                 num_samples = 1000
                 indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
 
+            print(len(indexes))
+            terminal_infos = [raw_terminal_infos[idx] if idx < len(raw_terminal_infos) else {} for idx in indexes]
 
             tasks = np.ones(len([actions[i] for i in indexes]), dtype=np.int64) * i
             states = [states[i] for i in indexes]
@@ -166,6 +187,7 @@ class TrajectoryDataset(Dataset):
             merge_returns.extend(returns)
             merge_timesteps.extend(timesteps)
             merge_tasks.extend(tasks)
+            merge_infos.extend(terminal_infos)
 
         self.actions = merge_actions
         self.rewards = merge_rewards
@@ -175,6 +197,7 @@ class TrajectoryDataset(Dataset):
         self.returns = merge_returns
         self.timesteps = merge_timesteps
         self.tasks = merge_tasks
+        self.infos = merge_infos
 
         # ==================================
         # remove trajectories with length 0
@@ -189,6 +212,7 @@ class TrajectoryDataset(Dataset):
         self.returns = [i for i, m in zip(self.returns, traj_len_mask) if m]
         self.timesteps = [i for i, m in zip(self.timesteps, traj_len_mask) if m]
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
+        self.infos = [i for i, m in zip(self.infos, traj_len_mask) if m]
 
 
         self.traj_lens = self.traj_lens[traj_len_mask]

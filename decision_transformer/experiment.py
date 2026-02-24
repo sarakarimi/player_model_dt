@@ -3,7 +3,7 @@ This file is the entry point for running the decision transformer.
 """
 import torch as t
 
-from configs import RunConfig, TransformerModelConfig, OfflineTrainConfig
+from configs import RunConfig, TransformerModelConfig, OfflineTrainConfig, TransformerEncoderConfig
 from make_env import make_env
 from runner import run_decision_transformer
 from util import parse_args
@@ -64,13 +64,28 @@ if __name__ == "__main__":
         convert_to_one_hot=args.convert_to_one_hot,
         device=run_config.device,
         soft_prompt_mode=args.soft_prompt_mode,
+        soft_prompt_enc_dec_mode=args.soft_prompt_enc_dec_mode,
+        vae_model_type=args.vae_model_type,
         vae_model_save_path=args.vae_model_save_path,
         vae_model_params=args.vae_model_params,
+    )
+
+    # only used for the encoder decoder architecture
+    encoder_config = TransformerEncoderConfig(
+        in_dim=args.in_dim,
+        d_model=args.encoder_d_model,
+        nhead=args.encoder_n_heads,
+        num_enc_layers=args.encoder_n_layers,
+        dim_ff=args.dim_ff,
+        dropout=args.dropout,
+        z_dim=args.z_dim,
+        # pos_max_len=args.pos_max_len,
     )
 
     run_decision_transformer(
         run_config=run_config,
         transformer_config=transformer_model_config,
         offline_config=offline_config,
+        encoder_config=encoder_config,
         make_env=make_env,
     )

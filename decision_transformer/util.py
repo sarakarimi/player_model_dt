@@ -3,6 +3,7 @@ import math
 from typing import Any, Optional
 
 import torch
+from sqlalchemy.testing.plugin.plugin_base import options
 from torch import optim
 from torch.optim import lr_scheduler
 
@@ -14,16 +15,10 @@ def parse_args():
         epilog="The last enemy that shall be defeated is death.",
     )
     parser.add_argument("--exp_name", type=str, default="MiniGrid-ThreeStyleEnv")
-    parser.add_argument("--soft_prompt_mode", type=bool, default=True, action=argparse.BooleanOptionalAction)
-    parser.add_argument("--vae_model_save_path", type=str,
-                        default="/home/sara/repositories/player_model_dt/trained_models/minigrid_model/style_vae/trained_model.pth")
-    parser.add_argument("--vae_model_params", type=dict, default={
-        'input_size': 9 + 1,  # 20 #500  # Number of features in each timestep
-        'hidden_size': 256,  # 20
-        'latent_size': 64,  # 10  # 64 looks ok for mujoco
-    })
+    parser.add_argument("--track", type=bool, default=True, action=argparse.BooleanOptionalAction,)
+    parser.add_argument("--wandb_project_name", type=str, default="DT-MiniGrid",)
+    parser.add_argument("--wandb_entity", type=str, default=None)
 
-    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--trajectory_paths", nargs='+', default=[
         # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_backstab.gz",
         # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_bypass.gz",
@@ -31,8 +26,30 @@ def parse_args():
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_bypass.gz",
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_weapon.gz",
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_camouflage.gz",
+    ])
 
-    ])  # required=True)
+    parser.add_argument("--soft_prompt_mode", type=bool, default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--soft_prompt_enc_dec_mode", type=bool, default=True, action=argparse.BooleanOptionalAction)
+
+    parser.add_argument("--vae_model_type", type=str,
+                        default="transformer")  # "lstm" or "transformer"
+    parser.add_argument("--vae_model_save_path", type=str,
+                        default="/home/sara/repositories/player_model_dt/trained_models/minigrid_model/style_vae/three_style_env_hard_transformer_model.pth") # /home/sara/repositories/player_model_dt/trained_models/minigrid_model/style_vae/three_style_env_hard_lstm_model.pth")
+    parser.add_argument("--vae_model_params", type=dict, default={'input_size': 9 + 1, 'hidden_size': 256, 'latent_size': 64,})
+
+    # transformer enc dt dec model params
+    parser.add_argument("--in_dim", type=int, default=9+1)
+    parser.add_argument("--encoder_d_model", type=int, default=128)
+    parser.add_argument("--encoder_n_heads", type=int, default=8)
+    parser.add_argument("--encoder_n_layers", type=int, default=4)
+    parser.add_argument("--dim_ff", type=int, default=512)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--z_dim", type=int, default=16)
+    # parser.add_argument("--pos_max_len", type=int, default=50)
+
+
+    # decision transformer params
+    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--n_heads", type=int, default=2)
     parser.add_argument("--d_mlp", type=int, default=256)
     parser.add_argument("--activation_fn", type=str, default="relu")
@@ -46,58 +63,27 @@ def parse_args():
     parser.add_argument("--test_epochs", type=int, default=10)
     parser.add_argument("--optimizer", type=str, default="AdamW")
 
-    parser.add_argument(
-        "--scheduler", type=str, default="CosineAnnealingWarmup"
-    )
+    parser.add_argument("--scheduler", type=str, default="CosineAnnealingWarmup")
     parser.add_argument("--warm_up_steps", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=0.0001)
     parser.add_argument("--lr_end", type=float, default=10e-8)
     parser.add_argument("--num_cycles", type=int, default=3)
     parser.add_argument("--weight_decay", type=float, default=0.001)
     parser.add_argument("--state_embedding", type=str, default="grid")
-    parser.add_argument(
-        "--linear_time_embedding",
-        type=bool,
-        default=False,
-        action=argparse.BooleanOptionalAction,
-    )
+    parser.add_argument( "--linear_time_embedding", type=bool, default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument("--pct_traj", type=float, default=1)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument(
-        "--track",
-        type=bool,
-        default=True,
-        action=argparse.BooleanOptionalAction,
-    )
-    parser.add_argument(
-        "--wandb_project_name",
-        type=str,
-        default="DT-MiniGrid",
-    )
-    parser.add_argument("--wandb_entity", type=str, default=None)
-    parser.add_argument("--test_frequency", type=int, default=500)
+
+    parser.add_argument("--test_frequency", type=int, default=10)
     parser.add_argument("--eval_frequency", type=int, default=50)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--eval_num_envs", type=int, default=8)
-    parser.add_argument(
-        "--initial_rtg",
-        action="append",
-        help="<Required> Set flag",
-        required=False,
-        default=[2],
-    )
+    parser.add_argument("--initial_rtg", action="append", help="<Required> Set flag", required=False, default=[2])
     parser.add_argument("--prob_go_from_end", type=float, default=0.0)
     parser.add_argument("--eval_max_time_steps", type=int, default=1000)
     parser.add_argument("--cuda", default=False, action=argparse.BooleanOptionalAction)
-    parser.add_argument(
-        "--model_type", type=str, default="decision_transformer"
-    )
-    parser.add_argument(
-        "--convert_to_one_hot",
-        type=bool,
-        default=False,
-        action=argparse.BooleanOptionalAction,
-    )
+    parser.add_argument("--model_type", type=str, default="variational_style_dt") # variational_style_dt or decision_transformer
+    parser.add_argument("--convert_to_one_hot", type=bool, default=False, action=argparse.BooleanOptionalAction,)
     args = parser.parse_args()
     return args
 
@@ -158,6 +144,9 @@ def get_optim_groups(model, offline_config):
             elif "W_" in pn:
                 # weights of all tlens weight modules will be decayed
                 decay.add(fpn)
+            elif "in_proj_weight" in pn or "out_proj.weight" in pn:
+                # self-attention projection weights (from nn.MultiheadAttention) will be decayed
+                decay.add(fpn)
             elif pn.endswith("weight") and isinstance(
                     m, blacklist_weight_modules
             ):
@@ -168,6 +157,12 @@ def get_optim_groups(model, offline_config):
 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}
+
+    # Filter out parameter names that don't exist in param_dict
+    # This can happen with shared/referenced modules
+    decay = decay & set(param_dict.keys())
+    no_decay = no_decay & set(param_dict.keys())
+
     inter_params = decay & no_decay
     union_params = decay | no_decay
     assert (
@@ -175,11 +170,12 @@ def get_optim_groups(model, offline_config):
     ), "parameters %s made it into both decay/no_decay sets!" % (
         str(inter_params),
     )
-    assert (
-            len(param_dict.keys() - union_params) == 0
-    ), "parameters %s were not separated into either decay/no_decay set!" % (
-        str(param_dict.keys() - union_params),
-    )
+
+    # Check if any parameters were missed
+    uncategorized = param_dict.keys() - union_params
+    if len(uncategorized) > 0:
+        print(f"Warning: parameters {uncategorized} were not categorized, adding to no_decay")
+        no_decay.update(uncategorized)
 
     # create the pytorch optimizer object
     optim_groups = [
@@ -302,8 +298,8 @@ def get_max_len_from_model_type(model_type: str, n_ctx: int):
     timestep for every 3 tokens for decision transformers and
     every 2 tokens for clone transformers.
     """
-    assert model_type in ["decision_transformer", "clone_transformer"]
-    if model_type == "decision_transformer":
+    assert model_type in ["decision_transformer", "clone_transformer", "variational_style_dt"]
+    if model_type == "decision_transformer" or model_type == "variational_style_dt":
         return 1 + n_ctx // 3
     else:
         return 1 + n_ctx // 2
@@ -397,6 +393,103 @@ def initialize_padding_inputs(
 
 
     if soft_prompt_mode is True:
-        assert prompt.shape[-1] == 64, "style vector's last dim must be 64"
         prompt = prompt * torch.ones((batch_size, 1, prompt.shape[-1]), dtype=torch.float).to(device)
     return obs, actions, reward, rtg, timesteps, mask, prompt
+
+
+
+def initialize_padding_inputs_enc_dec(
+        max_len: int,
+        initial_obs: dict,
+        initial_rtg: float,
+        action_pad_token: int,
+        batch_size=1,
+        encoder_input=None,
+        encoder_input_mask=None,
+        device="cpu",
+):
+    """
+    Initializes input tensors for a decision transformer based on the given maximum length of the sequence, initial observation, initial return-to-go (rtg) value,
+    and padding token for actions.
+
+    Padding token for rtg is assumed to be the initial RTG at all values. This is important.
+    Padding token for initial obs is 0. But it could be -1 and we might parameterize in the future.
+    Mask is initialized to 0.0 and then set to 1.0 for all values that are not padding (one value currently)
+
+    Args:
+    - max_len (int): maximum length of the sequence
+    - initial_obs (Dict[str, Union[torch.Tensor, np.ndarray]]): initial observation dictionary, containing an "image" tensor with shape (batch_size, channels, height, width)
+    - initial_rtg (float): initial return-to-go value used to initialize the reward-to-go tensor
+    - action_pad_token (int): padding token used to initialize the actions tensor
+    - batch_size (int): batch size of the sequences (default: 1)
+
+    Returns:
+    - obs (torch.Tensor): tensor of shape (batch_size, max_len, channels, height, width), initialized with zeros and the initial observation in the last dimension
+    - actions (torch.Tensor): tensor of shape (batch_size, max_len - 1, 1), initialized with the padding token
+    - reward (torch.Tensor): tensor of shape (batch_size, max_len, 1), initialized with zeros
+    - rtg (torch.Tensor): tensor of shape (1, max_len, 1), initialized with the initial rtg value and broadcasted to the batch size dimension
+    - timesteps (torch.Tensor): tensor of shape (batch_size, max_len, 1), initialized with zeros
+    - mask (torch.Tensor): tensor of shape (batch_size, max_len), initialized with zeros and ones at the last position to mark the end of the sequence
+    """
+
+    device = torch.device(device)
+
+    mask = torch.concat(
+        (
+            torch.zeros((batch_size, max_len - 1), dtype=torch.bool),
+            torch.ones((batch_size, 1), dtype=torch.bool),
+        ),
+        dim=1,
+    ).to(device)
+
+    obs_dim = initial_obs["image"].shape[-3:]
+    if len(initial_obs["image"].shape) == 3:
+        assert (
+                batch_size == 1
+        ), "only one initial obs provided but batch size > 1"
+        obs_image = torch.tensor(initial_obs["image"])[None, None, :, :, :].to(
+            device
+        )
+    elif len(initial_obs["image"].shape) == 4:
+        obs_image = torch.tensor(initial_obs["image"])[:, None, :, :, :].to(
+            device
+        )
+    else:
+        raise ValueError(
+            "initial obs image has invalid shape: {}".format(
+                initial_obs["image"].shape
+            )
+        )
+
+    obs = torch.concat(
+        (
+            torch.zeros((batch_size, max_len - 1, *obs_dim)).to(device),
+            obs_image,
+        ),
+        dim=1,
+    ).to(float)
+
+    reward = torch.zeros((batch_size, max_len, 1), dtype=torch.float).to(
+        device
+    )
+    rtg = initial_rtg * torch.ones(
+        (batch_size, max_len, 1), dtype=torch.float
+    ).to(device)
+    timesteps = torch.zeros((batch_size, max_len, 1), dtype=torch.long).to(
+        device
+    )
+
+    actions = (
+            torch.ones(batch_size, max_len - 1, 1, dtype=torch.long)
+            * action_pad_token
+    ).to(device)
+
+    # Replicate encoder_input and encoder_input_mask for batch_size (parallel environments)
+    # Note: Padding is already done in sample_random_prompts(), we just need to replicate
+    if encoder_input is not None and encoder_input_mask is not None:
+        # encoder_input shape: (seq_len, feature_dim) -> (batch_size, seq_len, feature_dim)
+        encoder_input = encoder_input.unsqueeze(0).repeat(batch_size, 1, 1).to(device)
+        # encoder_input_mask shape: (seq_len,) -> (batch_size, seq_len)
+        encoder_input_mask = encoder_input_mask.unsqueeze(0).repeat(batch_size, 1).to(device)
+
+    return obs, actions, reward, rtg, timesteps, mask, encoder_input, encoder_input_mask

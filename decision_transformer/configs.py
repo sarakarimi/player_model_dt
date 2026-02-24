@@ -47,7 +47,7 @@ class EnvironmentConfig:
     observation_space: None = None
     device: str = "cpu"
     env_styles = ["bypass", "weapon", "camouflage"] #["backstab", "bypass", "weapon"]
-    style_vector_size: int =  64 # size of style vector
+    style_vector_size: int =  16 # size of style vector
 
     def __post_init__(self):
         env = MiniGridThreeStyles(render_mode=self.render_mode, target_style=None)
@@ -208,14 +208,16 @@ class OfflineTrainConfig:
     track: bool = True
     device: str = "cpu"
     soft_prompt_mode: bool = False
+    soft_prompt_enc_dec_mode: bool = False
     env_mode: int = 1
 
     # saved style VAE model path and parameters
+    vae_model_type: str = None
     vae_model_save_path: str = None
     vae_model_params: dict = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
-        assert self.model_type in ["decision_transformer", "clone_transformer"]
+        assert self.model_type in ["decision_transformer", "clone_transformer", "variational_style_dt"]
         if isinstance(self.device, torch.device):
             self.device = str(self.device)
 
@@ -276,6 +278,21 @@ class RunConfig:
     def __post_init__(self):
         if isinstance(self.device, torch.device):
             self.device = str(self.device)
+
+
+@dataclass
+class TransformerEncoderConfig:
+    in_dim: int = 9 + 1
+
+    d_model: int = 128
+    nhead: int = 8
+    num_enc_layers: int = 4
+    dim_ff: int = 512
+    dropout: float = 0.1
+
+    z_dim: int = 16
+    pos_max_len: int = 50  # must be >= max_len
+
 
 
 class ConfigJsonEncoder(json.JSONEncoder):

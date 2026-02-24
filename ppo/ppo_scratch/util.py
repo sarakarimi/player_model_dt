@@ -8,7 +8,7 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+MODE = "weapon" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
 EASY_ENV = False
 
 def parse_args():

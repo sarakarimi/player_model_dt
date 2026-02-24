@@ -916,7 +916,7 @@ def train_style_prompt_dt(
 
     # Plot evaluation results
     if eval_history["epochs"]:
-        plot_eval_results(eval_history, save_path="eval_results.png")
+        plot_eval_results(eval_history, save_path="plots/eval_results.png")
 
     return model
 

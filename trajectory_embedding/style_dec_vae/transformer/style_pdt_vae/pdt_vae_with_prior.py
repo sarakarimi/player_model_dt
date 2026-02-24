@@ -12,6 +12,51 @@ from torch.utils.data import DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
+
+
+def controls_from_episode_summary(
+    episode_summary: dict,
+    max_enemy_distance: float = 12.0,
+) -> np.ndarray:
+    """
+    Build a 5-dim float32 control vector from an episode_summary dict produced
+    by MiniGridThreeStyles.
+
+    Dimensions: [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
+
+    risk_tolerance : inverse of min distance to enemy (closer => riskier)
+    resource_pref  : item-pickup intensity (weapon / camouflage pickups)
+    stealth_pref   : far from enemy without weapon (bypass) OR used camouflage
+    safety_pref    : avg distance from enemy, boosted by camouflage protection
+    commitment     : path efficiency (forward steps / total steps)
+
+    All values are clipped to [0, 1].
+    """
+    min_dist = float(episode_summary.get("min_enemy_distance", 0.0))
+    avg_dist = float(episode_summary.get("avg_enemy_distance", 0.0))
+    path_efficiency = float(episode_summary.get("path_efficiency", 0.0))
+    items_picked = int(episode_summary.get("items_picked", 0))
+    picked_weapon = float(bool(episode_summary.get("picked_weapon", False)))
+    picked_camouflage = float(bool(episode_summary.get("picked_camouflage", False)))
+
+    norm_min = np.clip(min_dist / max_enemy_distance, 0.0, 1.0)
+    norm_avg = np.clip(avg_dist / max_enemy_distance, 0.0, 1.0)
+
+    risk_tolerance = 1.0 - norm_min
+    resource_pref = np.clip(items_picked / 2.0, 0.0, 1.0)
+    stealth_pref = np.clip(
+        norm_avg * (1.0 - picked_weapon) + picked_camouflage * 0.9,
+        0.0, 1.0,
+    )
+    safety_pref = np.clip(norm_avg + picked_camouflage * 0.3, 0.0, 1.0)
+    commitment = path_efficiency
+
+    return np.array(
+        [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment],
+        dtype=np.float32,
+    )
+
+
 from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
 from trajectory_embedding.style_dec_vae.lstm.style_vae import cluster_latents, plot_embeddings
 from trajectory_gpt2 import GPT2Model
@@ -64,28 +109,27 @@ class MiniGridDataset(TrajectoryDataset):
         self.max_seq_len = max(self.seq_lens)
         self.control_dim = control_dim
 
-        # ---------------------------------------------------------------------
-        # designers will provide controls at inference.
-        # For training, each trajectory must have a control vector.
+        # Build per-trajectory control vectors from episode_summary stored in infos.
+        # Falls back to fixed style-label mapping when episode_summary is unavailable
+        # (e.g. episodes ended via detection, or older datasets without episode_summary).
         # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
-        #
-        # With 3 styles, I map each style label to a fixed control vector
-        # ---------------------------------------------------------------------
-        style_to_controls = {
+        _fallback_controls = {
             0: np.array([0.10, 0.10, 0.60, 0.90, 0.60], dtype=np.float32),  # bypass
             1: np.array([0.70, 0.90, 0.20, 0.30, 0.80], dtype=np.float32),  # weapon
             2: np.array([0.40, 0.80, 0.90, 0.80, 0.70], dtype=np.float32),  # camouflage
         }
-
-
-        # TODO If I already have controls stored, replace this whole block with my actual data.
         self.controls = []
         for traj_i in range(len(self.states)):
-            label = int(self.tasks[traj_i])
-            c = style_to_controls[label]
+            ep_info = self.infos[traj_i] if traj_i < len(self.infos) else {}
+            es = ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
+            if es is not None:
+                c = controls_from_episode_summary(es)
+            else:
+                c = _fallback_controls[int(self.tasks[traj_i])]
             assert c.shape[0] == self.control_dim
             self.controls.append(c)
         self.controls = np.stack(self.controls, axis=0)  # [N, control_dim]
+
 
     def get_traj(self, traj_index, max_len=100, prob_go_from_end=None):
         traj_rewards = self.rewards[traj_index]
@@ -549,12 +593,12 @@ def evaluate_online_controls(
     # style id -> env target style name (only for spawning env variants)
     style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
 
-    # TODO make the  dataset contain per-trajectory controls so I can choose a representative c for each style by sampling from dataset controls.
-    # TODO for now I use a fixed mapping (same as training mapping).
+    # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
+    # Fallback when dataset has no controls stored (should not happen with new datasets).
     fallback_style_to_controls = {
-        0: np.array([0.10, 0.10, 0.60, 0.90, 0.60], dtype=np.float32),  # bypass
-        1: np.array([0.70, 0.90, 0.20, 0.30, 0.80], dtype=np.float32),  # weapon
-        2: np.array([0.40, 0.80, 0.90, 0.80, 0.70], dtype=np.float32),  # camouflage
+        0: np.array([0.67, 0.01, 0.53, 0.53, 0.82], dtype=np.float32),  # bypass
+        1: np.array([0.92, 0.51, 0.00, 0.00, 0.59], dtype=np.float32),  # weapon
+        2: np.array([0.92, 0.53, 1.00, 0.63, 0.74], dtype=np.float32),  # camouflage
     }
 
     results = {style_id: [] for style_id in range(num_styles)}
@@ -567,7 +611,6 @@ def evaluate_online_controls(
         for style_id in range(num_styles):
             c = None
 
-            # TODO: fix this sampling approach
             if hasattr(dataset, "controls") and dataset.controls is not None:
                 # sample one trajectory index of this style and take its controls
                 style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
@@ -865,7 +908,7 @@ def train_style_prompt_dt(
 
     # Plot evaluation results
     if eval_history["epochs"]:
-        plot_eval_results(eval_history, save_path="eval_results.png")
+        plot_eval_results(eval_history, save_path="plots/eval_results.png")
 
     return model
 
@@ -879,7 +922,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     dataset_params = {
-        "sampling": False,
+        "sampling": True,
         "index_channel_only": True,
         "state_normalization_factor": 1,
         "action_normalization_factor": 1,
@@ -914,7 +957,7 @@ if __name__ == "__main__":
         grad_clip=1.0,
         action_loss_weight=1.0,
         log_every=10,
-        save_path="style_prompt_dt_minigrid_controls_condprior.pth",
+        save_path="trained_models/style_prompt_dt_minigrid_controls_condprior.pth",
     )
 
     # Latent visualization (still uses encoder z)

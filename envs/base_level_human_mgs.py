@@ -77,7 +77,7 @@ def metal_grid_env():
     metal_env = MetalGridSolidEnv(agent=agent,
                             enemies=enemies,
                             vents=[
-                                # vent_l,
+                                vent_l,
                                 vent_r
                             ],
                             items=items,

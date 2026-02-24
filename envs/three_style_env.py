@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple
+import random
 
 import gymnasium as gym
 import pygame
@@ -111,6 +112,7 @@ class MiniGridThreeStyles(MiniGridEnv):
             non_target_penalty: float = 0.0,  # paid if achieved != target_style
             style_bonuses: Optional[dict] = None,  # used only when target_style is None
             easy_env: bool = True,  # easy 3 style env with no pillars and simple layout
+            randomize_layout: bool = False,  # randomize positions for trajectory diversity
             **kwargs
     ):
 
@@ -125,6 +127,7 @@ class MiniGridThreeStyles(MiniGridEnv):
 
         self.size = size
         self.easy_env = easy_env
+        self.randomize_layout = randomize_layout
         if not self.easy_env:
             self.size = 11
         mission_space = MissionSpace(mission_func=self._gen_mission)
@@ -187,6 +190,13 @@ class MiniGridThreeStyles(MiniGridEnv):
         self.camouflage_picked = False
         self.camouflage_dropped = False
 
+        # Tracking variables for control metric computation
+        self.step_count = 0
+        self.min_distance_to_enemy = float('inf')
+        self.sum_distance_to_enemy = 0.0
+        self.forward_action_count = 0
+        self.items_picked_count = 0
+
         self.grid = self._create_grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
 
@@ -197,43 +207,79 @@ class MiniGridThreeStyles(MiniGridEnv):
         # Keep things open so bypass vs backstab vs weapon are all feasible.
 
         # Place goal
-        goal_x, goal_y = width - 2, height // 2
+        if self.randomize_layout:
+            goal_x = width - 2
+            goal_y = random.randint(height // 2 - 1, height // 2 + 1)
+        else:
+            goal_x, goal_y = width - 2, height // 2
         self.goal_pos = (goal_x, goal_y)
-
         self.put_obj(Goal(), goal_x, goal_y)
 
-        # Place enemy
-        ex, ey = width // 2, height // 2
-        self.enemy_dir = 0  # facing right
+        # Place enemy with randomization
+        if self.randomize_layout:
+            if self.easy_env:
+                ex = random.randint(width // 2 - 1, width // 2 + 1)
+                ey = random.randint(height // 2 - 1, height // 2 + 1)
+            else:
+                ex = random.randint(width // 2 , width // 2 )
+                ey = random.randint(height // 2 - 2, height // 2 )
+        else:
+            ex, ey = width // 2, height // 2
+            self.enemy_dir = 0  # facing right
+
         self.enemy_obj = Enemy(dir=self.enemy_dir)
         self.put_obj(self.enemy_obj, ex, ey)
         self.enemy_pos = (ex, ey)
         self.enemy_alive = True
 
-        # Place weapon
-        if self.easy_env:
-            wx, wy = 2, 1
+        # Place weapon with randomization
+        if self.randomize_layout:
+            if self.easy_env:
+                wx = random.randint(2, 3)
+                wy = random.randint(1, 2)
+            else:
+                wx = random.randint(2, 4)
+                wy = random.randint(3, 6)
         else:
-            wx, wy = 3, 5
+            if self.easy_env:
+                wx, wy = 2, 1
+            else:
+                wx, wy = 3, 5
         self.put_obj(Weapon(), wx, wy)
 
-        # Place Camouflage
+        # Place Camouflage with randomization
         if not self.easy_env:
-            self.put_obj(Camouflage(), 1, 3)  # Add this line
+            if self.randomize_layout:
+                cx = random.randint(1, 2)
+                cy = random.randint(2, 4)
+            else:
+                cx, cy = 1, 3
+            self.put_obj(Camouflage(), cx, cy)
 
         # Optionally add some walls to make routing interesting but not forced
         # (Keep simple; you can tweak as needed)
         # Example: a little pillar above the enemy to shape paths
         if not self.easy_env:
-            px, py = ex, ey + 1
+            px, py = width // 2, height // 2 + 1
             if 1 < py < height - 1:
                 for i in range(4):
                     self.put_obj(Wall(), px + i, py)
                     self.put_obj(Wall(), px + i, py + 2)
+
+                # for i in range(6):
+                #     self.put_obj(Wall(), px - 2 + i, py + 2)
+                # self.put_obj(Wall(), px - 2, py + 1)
                 self.put_obj(Wall(), px, py + 1)
 
-        # Place agent
-        self.place_agent(top=(1, height // 2 + 2), size=(1, 1))
+        # Place agent with randomization
+        if self.randomize_layout:
+            if self.easy_env:
+                agent_y = random.randint(height // 2 + 1, height // 2 + 3)
+            else:
+                agent_y = random.randint(height // 2, height // 2 + 3)
+            self.place_agent(top=(1, agent_y), size=(1, 1))
+        else:
+            self.place_agent(top=(1, height // 2 + 2), size=(1, 1))
 
         self.detected = False
         self.style_used = None
@@ -294,6 +340,10 @@ class MiniGridThreeStyles(MiniGridEnv):
     def _is_adjacent(self, a: Tuple[int, int], b: Tuple[int, int]) -> bool:
         return abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
 
+    def _manhattan_distance(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Compute Manhattan distance between two positions."""
+        return float(abs(a[0] - b[0]) + abs(a[1] - b[1]))
+
     def _is_behind_enemy(self, agent_pos: Tuple[int, int]) -> bool:
         """Agent tile matches the tile directly behind the enemy."""
         if self.enemy_pos is None:
@@ -321,6 +371,21 @@ class MiniGridThreeStyles(MiniGridEnv):
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
         reward -= 0.005  # step penalty: comment out for Bypass mode or camouflage longer paths
+
+        # Track metrics for control computation
+        # self.step_count += 1
+
+        # Track distance to enemy
+        if self.enemy_alive and self.enemy_pos is not None:
+            dist = self._manhattan_distance(self.agent_pos, self.enemy_pos)
+            self.min_distance_to_enemy = min(self.min_distance_to_enemy, dist)
+            self.sum_distance_to_enemy += dist
+
+        # Track action types
+        if action == 2:  # forward action
+            self.forward_action_count += 1
+        if action == 3:  # pickup action
+            self.items_picked_count += 1
 
         # TODO remove Weapon pickup/drop tracking for rewards/penalties
         has_weapon = self._agent_has_weapon()
@@ -424,12 +489,34 @@ class MiniGridThreeStyles(MiniGridEnv):
             info["base_reward"] = base
             info["style_bonus_or_penalty"] = bonus
             info["total_reward"] = reward
+
+            # Add episode summary for control metric computation
+            avg_distance = self.sum_distance_to_enemy / max(self.step_count, 1) if self.enemy_alive else 0.0
+            info["episode_summary"] = {
+                "total_steps": self.step_count,
+                "min_enemy_distance": self.min_distance_to_enemy if self.min_distance_to_enemy != float('inf') else 0.0,
+                "avg_enemy_distance": avg_distance,
+                "forward_steps": self.forward_action_count,
+                "items_picked": self.items_picked_count,
+                "path_efficiency": self.forward_action_count / max(self.step_count, 1),
+                "was_detected": self.detected,
+                "achieved_style": achieved,
+                "picked_weapon": self.weapon_picked,
+                "picked_camouflage": self.camouflage_picked,
+            }
+
             return obs, reward, terminated, truncated, info
 
 
         info["style"] = self.style_used
         info["detected"] = self.detected
         info["enemy_alive"] = self.enemy_alive
+
+        # Add per-step metrics
+        if self.enemy_pos is not None:
+            info["distance_to_enemy"] = self._manhattan_distance(self.agent_pos, self.enemy_pos)
+        info["step_count"] = self.step_count
+
         return obs, reward, terminated, truncated, info
 
 

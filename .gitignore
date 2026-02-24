@@ -1,6 +1,4 @@
 1/
-datasets/
-trained_models/
 *__pycache__/
 gifs/
 .idea/
