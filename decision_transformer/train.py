@@ -16,6 +16,13 @@ from style_decision_transformer import (
 )
 
 
+def _save_checkpoint(model, path: str):
+    import os
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    t.save({"model_state_dict": model.state_dict()}, path)
+    print(f"Saved checkpoint to {path}")
+
+
 def train(
         model: TrajectoryTransformer,
         trajectory_data_set: TrajectoryDataset,
@@ -117,6 +124,11 @@ def train(
                 soft_prompt_mode=offline_config.soft_prompt_mode
             )
 
+        save_freq = getattr(offline_config, "save_frequency", 0)
+        save_path = getattr(offline_config, "model_save_path", None)
+        if save_freq > 0 and save_path and (epoch + 1) % save_freq == 0:
+            _save_checkpoint(model, save_path)
+
         if epoch % offline_config.eval_frequency == 0:
             eval_env_config = EnvironmentConfig(
                 capture_video=True,
@@ -157,6 +169,10 @@ def train(
                         prompt=prompt,
                         style_id=style_id
                     )
+
+    save_path = getattr(offline_config, "model_save_path", None)
+    if save_path:
+        _save_checkpoint(model, save_path)
 
     return model
 

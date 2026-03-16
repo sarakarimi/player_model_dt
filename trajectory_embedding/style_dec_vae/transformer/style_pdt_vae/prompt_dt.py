@@ -35,12 +35,18 @@ from trajectory_gpt2 import GPT2Model
 
 class PromptDataset(TrajectoryDataset):
     """
-    Returns a current-context window AND a full reference trajectory (prompt)
+    Returns a current-context window AND a fixed-length prompt trajectory
     sampled from the same style.
 
+    Prompt sampling follows prompt_utils.get_prompt() from the PromptDT paper:
+      - Takes the last `prompt_length` steps of the reference trajectory
+        (si = max(0, traj_len - prompt_length)), so the prompt always has a
+        fixed, well-defined length rather than varying by trajectory.
     Batch item:
-        s, a, r, d, rtg, ti, m            – current window  (max_len steps)
-        p_s, p_a, p_r, p_rtg, p_ti, p_m  – prompt          (max_seq_len steps)
+        s, a, r, d, rtg, ti, m            – current window
+                                             length: max_len
+        p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m  – prompt
+                                             length: prompt_length
         task_label
     """
 
@@ -58,6 +64,7 @@ class PromptDataset(TrajectoryDataset):
         state_normalization_factor: float = 1,
         action_normalization_factor: float = 1,
         device: str = "cpu",
+        prompt_length: int = None,        # steps per prompt episode; defaults to max_len
     ):
         super().__init__(
             trajectory_paths=trajectory_paths,
@@ -74,8 +81,7 @@ class PromptDataset(TrajectoryDataset):
             device=device,
         )
 
-        self.seq_lens    = [len(seq) for seq in self.states]
-        self.max_seq_len = max(self.seq_lens)
+        self.prompt_length = prompt_length
 
         # Pre-build style → index lookup so prompt sampling is O(1)
         self.style_to_indices: dict = {}
@@ -84,29 +90,48 @@ class PromptDataset(TrajectoryDataset):
             self.style_to_indices.setdefault(label, []).append(idx)
 
     # ------------------------------------------------------------------
-    def get_full_traj(self, traj_index: int):
+    def get_prompt_traj(self, traj_index: int):
+        """
+        Returns the last self.prompt_length steps of the trajectory,
+        padded to exactly self.prompt_length.
+
+        Matches prompt_utils.get_prompt() from the PromptDT paper:
+            si = max(0, traj_len - prompt_length)
+        RTG is computed as cumulative sum from right (returns-to-go).
+        """
         traj_rewards = self.rewards[traj_index]
         traj_states  = self.states[traj_index]
         traj_actions = self.actions[traj_index]
         traj_dones   = self.dones[traj_index]
-        traj_rtg     = np.ones(traj_rewards.shape) * traj_rewards[-1].item()
+        traj_len     = traj_rewards.shape[0]
 
-        s   = traj_states.reshape(1, -1, *self.state_dim)
-        a   = traj_actions.reshape(1, -1, *self.act_dim)
-        r   = traj_rewards.reshape(1, -1, 1)
-        rtg = traj_rtg.reshape(1, -1, 1)
-        d   = traj_dones.reshape(1, -1)
-        ti  = np.arange(0, s.shape[1]).reshape(1, -1)
+        # Random start in [0, traj_len - prompt_length] so the slice always has
+        # prompt_length steps and the last prompt_length steps can be selected.
+        si  = random.randint(0, max(0, traj_len - self.prompt_length))
+        end = si + self.prompt_length
 
-        tlen    = s.shape[1]
-        padding = self.max_seq_len - tlen
-        s   = self.add_padding(s,   0,    padding)
-        a   = self.add_padding(a,   -10,  padding)
-        r   = self.add_padding(r,   0,    padding)
-        rtg = self.add_padding(rtg, rtg[0, -1], padding)
-        d   = self.add_padding(d,   2,    padding)
-        ti  = self.add_padding(ti,  0,    padding)
-        m   = self.add_padding(np.ones((1, tlen)), 0, padding)
+        s   = traj_states[si:end].reshape(1, -1, *self.state_dim)
+        a   = traj_actions[si:end].reshape(1, -1, *self.act_dim)
+        r   = traj_rewards[si:end].reshape(1, -1, 1)
+        d   = traj_dones[si:end].reshape(1, -1)
+        ti  = np.arange(si, si + s.shape[1]).reshape(1, -1)
+
+        # RTG: cumulative sum of rewards from each step to end of trajectory.
+        # Convert to numpy first — PyTorch tensors don't support [::-1] slicing.
+        rewards_np = traj_rewards.numpy() if isinstance(traj_rewards, torch.Tensor) else np.asarray(traj_rewards)
+        rtg_vals = np.cumsum(rewards_np[si:][::-1])[::-1]
+        rtg = rtg_vals[:s.shape[1]].reshape(1, -1, 1)
+
+        actual_len = s.shape[1]
+        padding    = self.prompt_length - actual_len
+
+        s   = self.add_padding(s,   0,         padding)
+        a   = self.add_padding(a,   -10,        padding)
+        r   = self.add_padding(r,   0,          padding)
+        d   = self.add_padding(d,   2,          padding)
+        ti  = self.add_padding(ti,  0,          padding)
+        rtg = self.add_padding(rtg, 0,          padding)
+        m   = self.add_padding(np.ones((1, actual_len)), 0, padding)
 
         s   = (s   - self.state_mean) / self.state_std
         rtg = rtg  / self.rtg_scale
@@ -163,11 +188,11 @@ class PromptDataset(TrajectoryDataset):
             prob_go_from_end=self.prob_go_from_end,
         )
 
-        # prompt: a different trajectory from the same style
         candidates = self.style_to_indices.get(task_label, [traj_index])
         other = [i for i in candidates if i != traj_index]
-        prompt_index = random.choice(other) if other else traj_index
-        p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = self.get_full_traj(prompt_index)
+
+        p_idx = random.choice(other) if other else traj_index
+        p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = self.get_prompt_traj(p_idx)
 
         if self.preprocess_observations is not None:
             s = self.preprocess_observations(s)
@@ -320,9 +345,6 @@ class PromptingDecisionTransformer(nn.Module):
             p_acts = torch.clamp(p_actions.long().squeeze(-1), 0, self.act_dim - 1)
             if p_returns_to_go.ndim == 2:
                 p_returns_to_go = p_returns_to_go.unsqueeze(-1)
-            # handle off-by-one RTG length (matches original PromptDT code)
-            if p_returns_to_go.shape[1] % 10 == 1:
-                p_returns_to_go = p_returns_to_go[:, :-1]
 
             p_time_embeddings    = self.prompt_embed_timestep(p_timesteps)
             p_state_embeddings   = self.prompt_embed_state(p_states)   + p_time_embeddings
@@ -455,11 +477,11 @@ def evaluate_online_prompting(
                 print(f"  No trajectories for style {style_id}, skipping.")
                 continue
 
-            # One fixed prompt per style, shared across all episodes
-            prompt_idx = random.choice(candidates)
-            p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = eval_dataset.get_full_traj(prompt_idx)
 
-            # shape [1, T, ...] on device
+            prompt_idx = random.choice(candidates)
+            p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = eval_dataset.get_prompt_traj(prompt_idx)
+
+            # add batch dim and move to device
             p_s   = p_s.unsqueeze(0).to(eval_device)
             p_a   = p_a.unsqueeze(0).to(eval_device)
             p_r   = p_r.unsqueeze(0).to(eval_device)
@@ -476,6 +498,7 @@ def evaluate_online_prompting(
                     non_target_penalty=-1.0,
                     easy_env=False,
                     agent_view_size=3,
+                    randomize_layout=True,
                     **env_kwargs,
                 )
                 obs, _ = env.reset(seed=42 + ep)
@@ -541,7 +564,7 @@ def evaluate_online_prompting(
 # Plotting
 # =============================================================================
 
-def plot_eval_results(eval_history: dict, save_path: str = "eval_results_prompt.png"):
+def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_prompt.png"):
     epochs      = eval_history["epochs"]
     style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
 
@@ -680,15 +703,17 @@ def train_prompting_dt(
 # =============================================================================
 
 if __name__ == "__main__":
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    max_len = 8
     dataset_params = {
-        "sampling":                  True,
-        "index_channel_only":        True,
-        "state_normalization_factor": 1,
+        "sampling":                   True,
+        "index_channel_only":         True,
+        "state_normalization_factor":  1,
         "action_normalization_factor": 1,
-        "max_len":                   20,
+        "max_len":                    max_len,
+        "prompt_length":              2,   # steps per prompt episode (last N steps)
     }
     dataset = PromptDataset(trajectory_paths=paths, **dataset_params)
     loader  = DataLoader(
@@ -699,7 +724,7 @@ if __name__ == "__main__":
         state_dim=9,
         act_dim=7,
         hidden_size=128,
-        max_length=20,
+        max_length=max_len,
         max_ep_len=100,
         action_tanh=False,
         n_layer=4,
@@ -714,5 +739,5 @@ if __name__ == "__main__":
         lr=1e-3,
         grad_clip=1.0,
         log_every=10,
-        save_path="prompt_dt_minigrid.pth",
+        save_path="trained_models/prompt_dt_minigrid.pth",
     )

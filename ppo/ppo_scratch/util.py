@@ -8,7 +8,7 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "weapon" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+MODE = "bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
 EASY_ENV = False
 
 def parse_args():
@@ -132,7 +132,7 @@ def parse_args():
         "--vf_coef", type=float, default=0.5, help="value loss coefficient"
     )
     parser.add_argument(
-        "--ent_coef", type=float, default=0.012, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01
+        "--ent_coef", type=float, default=0.010, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01 for weapon 0.012
     )
     parser.add_argument(
         "--max_grad_norm",
@@ -149,7 +149,7 @@ def parse_args():
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_" + MODE + ".gz",
+        default="/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard_randomize_layout/PPO_trajectories_three_style_env_" + MODE + ".gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(
@@ -250,7 +250,7 @@ def store_model_checkpoint(
     agent, online_config, run_config, checkpoint_num, checkpoint_artifact
 ) -> int:
     checkpoint_name = f"{run_config.exp_name}_{checkpoint_num:0>2}_PPO"
-    checkpoint_path = f"../../trained_models/{checkpoint_name}.pt"
+    checkpoint_path = f"/home/sara/repositories/player_model_dt/trained_models/{checkpoint_name}.pt"
 
     torch.save(
         {

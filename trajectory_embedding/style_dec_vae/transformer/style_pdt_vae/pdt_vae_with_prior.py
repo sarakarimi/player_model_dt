@@ -14,49 +14,6 @@ from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
 
 
-def controls_from_episode_summary(
-    episode_summary: dict,
-    max_enemy_distance: float = 12.0,
-) -> np.ndarray:
-    """
-    Build a 5-dim float32 control vector from an episode_summary dict produced
-    by MiniGridThreeStyles.
-
-    Dimensions: [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
-
-    risk_tolerance : inverse of min distance to enemy (closer => riskier)
-    resource_pref  : item-pickup intensity (weapon / camouflage pickups)
-    stealth_pref   : far from enemy without weapon (bypass) OR used camouflage
-    safety_pref    : avg distance from enemy, boosted by camouflage protection
-    commitment     : path efficiency (forward steps / total steps)
-
-    All values are clipped to [0, 1].
-    """
-    min_dist = float(episode_summary.get("min_enemy_distance", 0.0))
-    avg_dist = float(episode_summary.get("avg_enemy_distance", 0.0))
-    path_efficiency = float(episode_summary.get("path_efficiency", 0.0))
-    items_picked = int(episode_summary.get("items_picked", 0))
-    picked_weapon = float(bool(episode_summary.get("picked_weapon", False)))
-    picked_camouflage = float(bool(episode_summary.get("picked_camouflage", False)))
-
-    norm_min = np.clip(min_dist / max_enemy_distance, 0.0, 1.0)
-    norm_avg = np.clip(avg_dist / max_enemy_distance, 0.0, 1.0)
-
-    risk_tolerance = 1.0 - norm_min
-    resource_pref = np.clip(items_picked / 2.0, 0.0, 1.0)
-    stealth_pref = np.clip(
-        norm_avg * (1.0 - picked_weapon) + picked_camouflage * 0.9,
-        0.0, 1.0,
-    )
-    safety_pref = np.clip(norm_avg + picked_camouflage * 0.3, 0.0, 1.0)
-    commitment = path_efficiency
-
-    return np.array(
-        [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment],
-        dtype=np.float32,
-    )
-
-
 from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
 from trajectory_embedding.style_dec_vae.lstm.style_vae import cluster_latents, plot_embeddings
 from trajectory_gpt2 import GPT2Model
@@ -108,27 +65,6 @@ class MiniGridDataset(TrajectoryDataset):
         self.seq_lens = [len(seq) for seq in self.states]
         self.max_seq_len = max(self.seq_lens)
         self.control_dim = control_dim
-
-        # Build per-trajectory control vectors from episode_summary stored in infos.
-        # Falls back to fixed style-label mapping when episode_summary is unavailable
-        # (e.g. episodes ended via detection, or older datasets without episode_summary).
-        # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
-        _fallback_controls = {
-            0: np.array([0.10, 0.10, 0.60, 0.90, 0.60], dtype=np.float32),  # bypass
-            1: np.array([0.70, 0.90, 0.20, 0.30, 0.80], dtype=np.float32),  # weapon
-            2: np.array([0.40, 0.80, 0.90, 0.80, 0.70], dtype=np.float32),  # camouflage
-        }
-        self.controls = []
-        for traj_i in range(len(self.states)):
-            ep_info = self.infos[traj_i] if traj_i < len(self.infos) else {}
-            es = ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
-            if es is not None:
-                c = controls_from_episode_summary(es)
-            else:
-                c = _fallback_controls[int(self.tasks[traj_i])]
-            assert c.shape[0] == self.control_dim
-            self.controls.append(c)
-        self.controls = np.stack(self.controls, axis=0)  # [N, control_dim]
 
 
     def get_traj(self, traj_index, max_len=100, prob_go_from_end=None):
@@ -449,9 +385,9 @@ class StyleVAEPromptDT(nn.Module):
 
         self.z_to_style_tokens = nn.Sequential(
             nn.Linear(latent_dim, 3 * hidden_size),
-            nn.GELU(),
-            nn.Linear(3 * hidden_size, 3 * hidden_size),
-            nn.LayerNorm(3 * hidden_size),
+            # nn.GELU(),
+            # nn.Linear(3 * hidden_size, 3 * hidden_size),
+            # nn.LayerNorm(3 * hidden_size),
         )
 
         self.prior = ConditionalPrior(control_dim=control_dim, latent_dim=latent_dim, hidden=prior_hidden)
@@ -557,6 +493,159 @@ class StyleVAEPromptDT(nn.Module):
             "kl_loss": kl_loss,
         }
 
+# =============================================================================
+# Training (minimal changes: pass controls)
+# =============================================================================
+
+def train_style_prompt_dt(
+    model: StyleVAEPromptDT,
+    dataloader: DataLoader,
+    num_epochs: int,
+    device: str = "cpu",
+    lr: float = 1e-4,
+    grad_clip: float = 1.0,
+    action_loss_weight: float = 1.0,
+    log_every: int = 10,
+    save_path: str = None,
+    eval_every: int = 10,
+    eval_episodes_per_style: int = 10,
+    max_ep_len: int = 100,
+    initial_rtg: float = 1.0,
+    beta_warmup_epochs: int = 0,
+):
+    model.to(device)
+    model.train()
+    optimizer = AdamW(model.parameters(), lr=lr)
+
+    # Track evaluation results
+    eval_history = {
+        "epochs": [],
+        "style_0": [],
+        "style_1": [],
+        "style_2": [],
+    }
+
+    for epoch in range(num_epochs):
+        if beta_warmup_epochs > 0:
+            beta = model.beta * min(1.0, (epoch + 1) / beta_warmup_epochs)
+        else:
+            beta = model.beta
+
+        running_loss = 0.0
+        running_bc = 0.0
+        running_kl = 0.0
+        n_batches = 0
+
+        for batch_idx, batch in enumerate(dataloader):
+            states = batch["states"].to(device)
+            actions = batch["actions"].to(device)
+            rtgs = batch["returns_to_go"].to(device)
+            timesteps = batch["timesteps"].to(device)
+            attn_mask = batch["attention_mask"].to(device)
+
+            full_states = batch["full_states"].to(device)
+            full_actions = batch["full_actions"].to(device)
+            full_timesteps = batch["full_timesteps"].to(device)
+            full_attn_mask = batch["full_attention_mask"].to(device)
+
+            controls = batch["controls"].to(device)  # [B, control_dim]
+
+            out = model(
+                full_states=full_states,
+                full_actions=full_actions,
+                full_timesteps=full_timesteps,
+                full_attention_mask=full_attn_mask,
+                controls=controls,
+                states=states,
+                actions=actions,
+                returns_to_go=rtgs,
+                timesteps=timesteps,
+                attention_mask=attn_mask,
+                beta=beta,
+            )
+
+            action_preds = out["action_preds"]
+            kl_loss = out["kl_loss"]
+
+            if action_loss_weight > 0:
+                B, T, C = action_preds.shape
+                if actions.ndim == 3:
+                    actions_ce = actions.squeeze(-1)
+                else:
+                    actions_ce = actions
+                actions_ce = torch.clamp(actions_ce.long(), 0, C - 1)
+
+                logits = action_preds.reshape(B * T, C)
+                targets = actions_ce.reshape(B * T)
+
+                ce = torch.nn.functional.cross_entropy(logits, targets, reduction="none").reshape(B, T)
+                valid = attn_mask.to(ce.dtype)
+                action_bc = (ce * valid).sum()
+            else:
+                action_bc = torch.zeros((), device=device)
+
+            loss = action_loss_weight * action_bc + kl_loss
+
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+
+            running_loss += float(loss.item())
+            running_bc += float(action_bc.item())
+            running_kl += float(kl_loss.item())
+            n_batches += 1
+
+            if log_every > 0 and (batch_idx + 1) % log_every == 0:
+                print(
+                    f"Epoch {epoch+1} | Step {batch_idx+1}/{len(dataloader)} "
+                    f"| loss={loss.item():.6f} bc={action_bc.item():.6f} kl={kl_loss.item():.6f}"
+                )
+
+        print(
+            f"===> Epoch {epoch+1}/{num_epochs} "
+            f"| avg_loss={running_loss/n_batches:.6f} "
+            f"| avg_bc={running_bc/n_batches:.6f} "
+            f"| avg_kl={running_kl/n_batches:.6f} "
+            f"| beta={beta:.6f}"
+        )
+
+        # Online evaluation every eval_every epochs
+        if eval_every > 0 and (epoch + 1) % eval_every == 0:
+            print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
+            eval_results = evaluate_online_controls(
+                model=model,
+                dataset=dataloader.dataset,
+                num_styles=3,
+                num_episodes_per_style=eval_episodes_per_style,
+                max_ep_len=max_ep_len,
+                device=device,
+                initial_rtg=initial_rtg,
+                env_kwargs=None,
+                deterministic_prior=False,
+                max_context=20,
+            )
+
+
+            # Record results
+            eval_history["epochs"].append(epoch + 1)
+            for style_id in range(3):
+                mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
+                eval_history[f"style_{style_id}"].append(mean_return)
+
+            print()
+
+        if save_path is not None and (epoch + 1) % eval_every == 0:
+            torch.save(model.state_dict(), save_path)
+            print(f"Saved model to {save_path}")
+
+    # Plot evaluation results
+    if eval_history["epochs"]:
+        plot_eval_results(eval_history, save_path="plots/eval_results_style_dt.png")
+
+    return model
+
 
 # =============================================================================
 # Online Evaluation
@@ -611,16 +700,16 @@ def evaluate_online_controls(
         for style_id in range(num_styles):
             c = None
 
-            if hasattr(dataset, "controls") and dataset.controls is not None:
-                # sample one trajectory index of this style and take its controls
-                style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
-                if len(style_indices) > 0:
-                    traj_idx = random.choice(style_indices)
-                    c = dataset.controls[traj_idx]  # numpy array [control_dim]
-                    c = np.asarray(c, dtype=np.float32)
+            # if hasattr(dataset, "controls") and dataset.controls is not None:
+            # sample one trajectory index of this style and take its controls
+            style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
+            if len(style_indices) > 0:
+                traj_idx = random.choice(style_indices)
+                c = dataset.controls[traj_idx]  # numpy array [control_dim]
+                c = np.asarray(c, dtype=np.float32)
 
-            if c is None:
-                c = fallback_style_to_controls[style_id]
+            # if c is None:
+            #     c = fallback_style_to_controls[style_id]
 
             controls = torch.tensor(c, dtype=torch.float32, device=device).unsqueeze(0)
 
@@ -636,10 +725,12 @@ def evaluate_online_controls(
                     non_target_penalty=-1.0,
                     easy_env=False,
                     agent_view_size=3,
+                    randomize_layout=True,
                     **env_kwargs
                 )
 
                 obs, _ = env.reset(seed=42 + ep)
+                # env.render()
 
                 # state: object index channel 0, flattened, normalized like training
                 state = torch.from_numpy(obs["image"][:, :, 0].flatten()).float().to(device)
@@ -716,7 +807,7 @@ def evaluate_online_controls(
 # Plotting
 # =============================================================================
 
-def plot_eval_results(eval_history: dict, save_path: str = "eval_results.png"):
+def plot_eval_results(eval_history: dict, save_path: str = "style_dt_eval_results.png"):
     """Plot the online evaluation results for each style over training."""
     epochs = eval_history["epochs"]
     style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
@@ -738,179 +829,7 @@ def plot_eval_results(eval_history: dict, save_path: str = "eval_results.png"):
     print(f"Saved combined evaluation plot to {save_path}")
     plt.close()
 
-    # Individual plots for each style
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    for style_id in range(3):
-        ax = axes[style_id]
-        returns = eval_history[f"style_{style_id}"]
-
-        ax.plot(epochs, returns, marker='o', color=f'C{style_id}', linewidth=2, markersize=6)
-        ax.set_xlabel("Epoch", fontsize=11)
-        ax.set_ylabel("Mean Episode Return", fontsize=11)
-        ax.set_title(f"{style_names[style_id]} (Style {style_id})", fontsize=13, fontweight='bold')
-        ax.grid(True, alpha=0.3)
-
-        # Add min/max/final annotations
-        if returns:
-            final_return = returns[-1]
-            max_return = max(returns)
-            ax.axhline(y=max_return, color='green', linestyle='--', alpha=0.5, linewidth=1)
-            ax.text(0.02, 0.98, f"Final: {final_return:.2f}\nMax: {max_return:.2f}",
-                   transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
-    plt.tight_layout()
-    individual_path = save_path.replace('.png', '_individual.png')
-    plt.savefig(individual_path, dpi=150)
-    print(f"Saved individual style plots to {individual_path}")
     plt.close()
-
-
-# =============================================================================
-# Training (minimal changes: pass controls)
-# =============================================================================
-
-def train_style_prompt_dt(
-    model: StyleVAEPromptDT,
-    dataloader: DataLoader,
-    num_epochs: int,
-    device: str = "cpu",
-    lr: float = 1e-4,
-    grad_clip: float = 1.0,
-    action_loss_weight: float = 1.0,
-    log_every: int = 10,
-    save_path: str = None,
-    eval_every: int = 10,
-    eval_episodes_per_style: int = 10,
-    max_ep_len: int = 100,
-    initial_rtg: float = 1.0,
-):
-    model.to(device)
-    model.train()
-    optimizer = AdamW(model.parameters(), lr=lr)
-
-    # Track evaluation results
-    eval_history = {
-        "epochs": [],
-        "style_0": [],
-        "style_1": [],
-        "style_2": [],
-    }
-
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        running_bc = 0.0
-        running_kl = 0.0
-        n_batches = 0
-
-        for batch_idx, batch in enumerate(dataloader):
-            states = batch["states"].to(device)
-            actions = batch["actions"].to(device)
-            rtgs = batch["returns_to_go"].to(device)
-            timesteps = batch["timesteps"].to(device)
-            attn_mask = batch["attention_mask"].to(device)
-
-            full_states = batch["full_states"].to(device)
-            full_actions = batch["full_actions"].to(device)
-            full_timesteps = batch["full_timesteps"].to(device)
-            full_attn_mask = batch["full_attention_mask"].to(device)
-
-            controls = batch["controls"].to(device)  # [B, control_dim]
-
-            out = model(
-                full_states=full_states,
-                full_actions=full_actions,
-                full_timesteps=full_timesteps,
-                full_attention_mask=full_attn_mask,
-                controls=controls,
-                states=states,
-                actions=actions,
-                returns_to_go=rtgs,
-                timesteps=timesteps,
-                attention_mask=attn_mask,
-            )
-
-            action_preds = out["action_preds"]
-            kl_loss = out["kl_loss"]
-
-            if action_loss_weight > 0:
-                B, T, C = action_preds.shape
-                if actions.ndim == 3:
-                    actions_ce = actions.squeeze(-1)
-                else:
-                    actions_ce = actions
-                actions_ce = torch.clamp(actions_ce.long(), 0, C - 1)
-
-                logits = action_preds.reshape(B * T, C)
-                targets = actions_ce.reshape(B * T)
-
-                ce = torch.nn.functional.cross_entropy(logits, targets, reduction="none").reshape(B, T)
-                valid = attn_mask.to(ce.dtype)
-                action_bc = (ce * valid).sum()
-            else:
-                action_bc = torch.zeros((), device=device)
-
-            loss = action_loss_weight * action_bc + kl_loss
-
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            if grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            optimizer.step()
-
-            running_loss += float(loss.item())
-            running_bc += float(action_bc.item())
-            running_kl += float(kl_loss.item())
-            n_batches += 1
-
-            if log_every > 0 and (batch_idx + 1) % log_every == 0:
-                print(
-                    f"Epoch {epoch+1} | Step {batch_idx+1}/{len(dataloader)} "
-                    f"| loss={loss.item():.6f} bc={action_bc.item():.6f} kl={kl_loss.item():.6f}"
-                )
-
-        print(
-            f"===> Epoch {epoch+1}/{num_epochs} "
-            f"| avg_loss={running_loss/n_batches:.6f} "
-            f"| avg_bc={running_bc/n_batches:.6f} "
-            f"| avg_kl={running_kl/n_batches:.6f}"
-        )
-
-        # Online evaluation every eval_every epochs
-        if eval_every > 0 and (epoch + 1) % eval_every == 0:
-            print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
-            eval_results = evaluate_online_controls(
-                model=model,
-                dataset=dataloader.dataset,
-                num_styles=3,
-                num_episodes_per_style=eval_episodes_per_style,
-                max_ep_len=max_ep_len,
-                device=device,
-                initial_rtg=initial_rtg,
-                env_kwargs=None,
-                deterministic_prior=False,
-                max_context=20,
-            )
-
-
-            # Record results
-            eval_history["epochs"].append(epoch + 1)
-            for style_id in range(3):
-                mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
-                eval_history[f"style_{style_id}"].append(mean_return)
-
-            print()
-
-        if save_path is not None:
-            torch.save(model.state_dict(), save_path)
-            print(f"Saved model to {save_path}")
-
-    # Plot evaluation results
-    if eval_history["epochs"]:
-        plot_eval_results(eval_history, save_path="plots/eval_results.png")
-
-    return model
 
 
 # =============================================================================
@@ -918,16 +837,18 @@ def train_style_prompt_dt(
 # =============================================================================
 
 if __name__ == "__main__":
-    device = "cpu"  # "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    max_len = 8
+    control_dim = 3
     dataset_params = {
         "sampling": True,
         "index_channel_only": True,
         "state_normalization_factor": 1,
         "action_normalization_factor": 1,
-        "max_len": 20,
-        "control_dim": 5,
+        "max_len": max_len,
+        "control_dim": control_dim, #5,
     }
     dataset = MiniGridDataset(trajectory_paths=paths, **dataset_params)
     loader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=dataset.collate_fn)
@@ -937,11 +858,11 @@ if __name__ == "__main__":
         act_dim=7,
         hidden_size=128,
         latent_dim=16,
-        max_length=20,
+        max_length=max_len,
         max_ep_len=100,
         action_tanh=False,
         beta=0.0085,
-        control_dim=5,
+        control_dim=control_dim,
         prior_hidden=128,
         free_bits=0.0,
         n_layer=4,
@@ -958,6 +879,7 @@ if __name__ == "__main__":
         action_loss_weight=1.0,
         log_every=10,
         save_path="trained_models/style_prompt_dt_minigrid_controls_condprior.pth",
+        beta_warmup_epochs=0
     )
 
     # Latent visualization (still uses encoder z)

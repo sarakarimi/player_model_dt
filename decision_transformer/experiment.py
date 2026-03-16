@@ -68,6 +68,8 @@ if __name__ == "__main__":
         vae_model_type=args.vae_model_type,
         vae_model_save_path=args.vae_model_save_path,
         vae_model_params=args.vae_model_params,
+        model_save_path=args.model_save_path,
+        save_frequency=args.save_frequency,
     )
 
     # only used for the encoder decoder architecture

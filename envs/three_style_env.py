@@ -7,12 +7,64 @@ import pygame
 from gymnasium import spaces
 from minigrid.core.mission import MissionSpace
 from minigrid.minigrid_env import MiniGridEnv
-from minigrid.core.world_object import WorldObj, Goal, Wall, Ball, Box
+from minigrid.core.world_object import WorldObj, Goal, Wall, Ball, Box, Lava
 from minigrid.core.grid import Grid
 from minigrid.core.constants import DIR_TO_VEC
-
+import numpy as np
 from envs.metalgridsolid.utils.utils import draw_triangle
 from envs.old.minigrid_dungeon.manual_control import ManualControl
+
+
+# --- rendering utils -----------------------------------------------------------
+def fill_coords(img, fn, color):
+    """
+    Fill pixels of an image with coordinates matching a filter function
+    """
+
+    for y in range(img.shape[0]):
+        for x in range(img.shape[1]):
+            yf = (y + 0.5) / img.shape[0]
+            xf = (x + 0.5) / img.shape[1]
+            if fn(xf, yf):
+                img[y, x] = color
+
+    return img
+
+def point_in_rect(xmin, xmax, ymin, ymax):
+    def fn(x, y):
+        return x >= xmin and x <= xmax and y >= ymin and y <= ymax
+
+    return fn
+
+def point_in_line(x0, y0, x1, y1, r):
+    p0 = np.array([x0, y0], dtype=np.float32)
+    p1 = np.array([x1, y1], dtype=np.float32)
+    dir = p1 - p0
+    dist = np.linalg.norm(dir)
+    dir = dir / dist
+
+    xmin = min(x0, x1) - r
+    xmax = max(x0, x1) + r
+    ymin = min(y0, y1) - r
+    ymax = max(y0, y1) + r
+
+    def fn(x, y):
+        # Fast, early escape test
+        if x < xmin or x > xmax or y < ymin or y > ymax:
+            return False
+
+        q = np.array([x, y])
+        pq = q - p0
+
+        # Closest point on line
+        a = np.dot(pq, dir)
+        a = np.clip(a, 0, dist)
+        p = p0 + a * dir
+
+        dist_to_line = np.linalg.norm(q - p)
+        return dist_to_line <= r
+
+    return fn
 
 
 # --- Custom objects -----------------------------------------------------------
@@ -30,26 +82,56 @@ class Enemy(WorldObj):
     def can_overlap(self):
         return False
 
-    # def see_behind_vec(self):
-    #     # Vector pointing "behind" relative to enemy facing
-    #     # dir^2 toggles 180 degrees: (dir + 2) % 4
-    #     return DIR_TO_VEC[(self.dir + 2) % 4]
 
     def render(self, img):
-        # Draw a filled triangle pointing in self.dir
+        c = np.array([155, 89, 182])
 
-        color = (256, 256, 200)
-        tri_dir = {0: 1, 1: 2, 2: 3, 3: 0}[self.dir]
+        def create_enemy_mask(dimensions):
+            """
+            Create a mask for a sword shape based on normalized coordinates (from 0 to 1).
+            """
+            # Central position based on dimensions
+            cx, cy = 0.5, 0.5  # Center in normalized coordinates
+            radius = 0.2  # Normalized radius of the central ball
+            num_spikes = 10  # Total number of spikes
+            spike_length = 0.3  # Normalized length of spikes
+            spike_width = 0.1  # Normalized width of each spike
 
-        cell_size = img.shape[0]  # tile is square
-        draw_triangle(
-            position=(0, 0),  # tile-local
-            direction=tri_dir,
-            color=color,
-            img=img,
-            cell_size=cell_size,
-            scale=0.8,  # a touch bigger looks nicer
-        )
+            def spiky_ball_fn(x, y):
+                # Check if inside the main ball
+                if (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2:
+                    return True
+
+                # Check each spike
+                for i in range(num_spikes):
+                    angle = 2 * np.pi * i / num_spikes
+                    # Define the start of the spike at the edge of the ball
+                    spike_base_x = cx + radius * np.cos(angle)
+                    spike_base_y = cy + radius * np.sin(angle)
+                    spike_tip_x = cx + (radius + spike_length) * np.cos(angle)
+                    spike_tip_y = cy + (radius + spike_length) * np.sin(angle)
+
+                    # Determine if point (x, y) is within the boundaries of this spike
+                    # Calculate distance to the line defined by the spike
+                    dx = spike_tip_x - spike_base_x
+                    dy = spike_tip_y - spike_base_y
+                    length = np.sqrt(dx ** 2 + dy ** 2)
+                    if length == 0:
+                        continue  # Prevent division by zero
+                    dx /= length
+                    dy /= length
+                    p = (x - spike_base_x) * dx + (y - spike_base_y) * dy
+                    if 0 <= p <= length:  # Check if point is along the spike's length
+                        dist = abs((x - spike_base_x) * dy - (y - spike_base_y) * dx)
+                        if dist <= spike_width / 2:  # Check if point is within the width
+                            return True
+
+                return False
+
+            return spiky_ball_fn
+
+        mask_fn = create_enemy_mask(img.shape)
+        fill_coords(img, mask_fn, c)
 
 
 class Weapon(WorldObj):
@@ -65,10 +147,45 @@ class Weapon(WorldObj):
         return True
 
     def render(self, img):
-        # Draw like a yellow circle-ish
-        img[:, :, 0] = 255
-        img[:, :, 1] = 255
-        img[:, :, 2] = 0
+        c = np.array([241, 196, 15])
+
+        def create_sword_mask(dimensions):
+            """
+            Create a mask for a sword shape based on normalized coordinates (from 0 to 1).
+            """
+            cx, cy = 0.5, 0.8  # Center x and lower center y for the sword, adjusted for visual balance
+            blade_height = 0.7
+            handle_height = 0.1
+            blade_width = 0.1
+            handle_width = 0.3
+            pommel_radius = 0.07
+
+            def sword_fn(x, y):
+                # Blade area
+                blade_top = cy - blade_height
+                blade_left = cx - blade_width / 2
+                blade_right = cx + blade_width / 2
+                if blade_top <= y <= cy and blade_left <= x <= blade_right:
+                    return True
+
+                # Handle area
+                handle_bottom = cy
+                handle_top = handle_bottom - handle_height
+                handle_left = cx - handle_width / 2
+                handle_right = cx + handle_width / 2
+                if handle_top <= y <= handle_bottom and handle_left <= x <= handle_right:
+                    return True
+
+                # Pommel area (circle at the bottom of the handle)
+                if (x - cx) ** 2 + (y - (handle_bottom + pommel_radius)) ** 2 <= pommel_radius ** 2:
+                    return True
+
+                return False
+
+            return sword_fn
+
+        mask_fn = create_sword_mask(img.shape)
+        fill_coords(img, mask_fn, c)
 
 
 # 1. Add Camouflage object
@@ -84,9 +201,7 @@ class Camouflage(WorldObj):
         return True
 
     def render(self, img):
-        img[:, :, 0] = 255
-        img[:, :, 1] = 141
-        img[:, :, 2] = 161
+        fill_coords(img, lambda x, y: (x - 0.5) ** 2 + (y - 0.5) ** 2 <= 0.35 ** 2, (34, 85, 34))
 
 
 # --- Environment --------------------------------------------------------------
@@ -113,6 +228,7 @@ class MiniGridThreeStyles(MiniGridEnv):
             style_bonuses: Optional[dict] = None,  # used only when target_style is None
             easy_env: bool = True,  # easy 3 style env with no pillars and simple layout
             randomize_layout: bool = False,  # randomize positions for trajectory diversity
+            layout: str = "default",  # "default" | "large"
             **kwargs
     ):
 
@@ -128,7 +244,10 @@ class MiniGridThreeStyles(MiniGridEnv):
         self.size = size
         self.easy_env = easy_env
         self.randomize_layout = randomize_layout
-        if not self.easy_env:
+        self.layout = layout
+        if layout == "large":
+            self.size = 15
+        elif not self.easy_env:
             self.size = 11
         mission_space = MissionSpace(mission_func=self._gen_mission)
 
@@ -200,6 +319,10 @@ class MiniGridThreeStyles(MiniGridEnv):
         self.grid = self._create_grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
 
+        if self.layout == "large":
+            self._gen_large_layout(width, height)
+            return
+
         # Layout:
         # Agent starts on the left, goal on the far right.
         # Enemy approximately in the middle, facing right.
@@ -209,23 +332,23 @@ class MiniGridThreeStyles(MiniGridEnv):
         # Place goal
         if self.randomize_layout:
             goal_x = width - 2
-            goal_y = random.randint(height // 2 - 1, height // 2 + 1)
+            goal_y = random.randint(height // 2 , height // 2 + 1)
         else:
             goal_x, goal_y = width - 2, height // 2
         self.goal_pos = (goal_x, goal_y)
         self.put_obj(Goal(), goal_x, goal_y)
 
         # Place enemy with randomization
-        if self.randomize_layout:
-            if self.easy_env:
-                ex = random.randint(width // 2 - 1, width // 2 + 1)
-                ey = random.randint(height // 2 - 1, height // 2 + 1)
-            else:
-                ex = random.randint(width // 2 , width // 2 )
-                ey = random.randint(height // 2 - 2, height // 2 )
-        else:
-            ex, ey = width // 2, height // 2
-            self.enemy_dir = 0  # facing right
+        # if self.randomize_layout:
+        #     if self.easy_env:
+        #         ex = random.randint(width // 2 - 1, width // 2 + 1)
+        #         ey = random.randint(height // 2 - 1, height // 2 + 1)
+        #     else:
+        #         ex = random.randint(width // 2 , width // 2 )
+        #         ey = random.randint(height // 2 - 2, height // 2 )
+        # else:
+        ex, ey = width // 2, height // 2
+        self.enemy_dir = 0  # facing right
 
         self.enemy_obj = Enemy(dir=self.enemy_dir)
         self.put_obj(self.enemy_obj, ex, ey)
@@ -238,8 +361,8 @@ class MiniGridThreeStyles(MiniGridEnv):
                 wx = random.randint(2, 3)
                 wy = random.randint(1, 2)
             else:
-                wx = random.randint(2, 4)
-                wy = random.randint(3, 6)
+                wx = random.randint(3, 4)
+                wy = random.randint(3, 5)
         else:
             if self.easy_env:
                 wx, wy = 2, 1
@@ -250,8 +373,12 @@ class MiniGridThreeStyles(MiniGridEnv):
         # Place Camouflage with randomization
         if not self.easy_env:
             if self.randomize_layout:
-                cx = random.randint(1, 2)
-                cy = random.randint(2, 4)
+                occupied = {(ex, ey), (wx, wy)}
+                while True:
+                    cx = random.randint(1, 2)
+                    cy = random.randint(2, 4)
+                    if (cx, cy) not in occupied:
+                        break
             else:
                 cx, cy = 1, 3
             self.put_obj(Camouflage(), cx, cy)
@@ -265,11 +392,7 @@ class MiniGridThreeStyles(MiniGridEnv):
                 for i in range(4):
                     self.put_obj(Wall(), px + i, py)
                     self.put_obj(Wall(), px + i, py + 2)
-
-                # for i in range(6):
-                #     self.put_obj(Wall(), px - 2 + i, py + 2)
-                # self.put_obj(Wall(), px - 2, py + 1)
-                self.put_obj(Wall(), px, py + 1)
+                # self.put_obj(Wall(), px, py + 1)
 
         # Place agent with randomization
         if self.randomize_layout:
@@ -289,6 +412,119 @@ class MiniGridThreeStyles(MiniGridEnv):
             "(3) pick up weapon and toggle to defeat enemy."
         )
 
+
+    def _gen_large_layout(self, width, height):
+        """
+        Large 15×15 layout with two horizontal tunnels and scattered obstacles.
+        Every style has multiple genuinely distinct paths.
+
+        Fixed layout (x→, y↓):
+          y=2  . . [####] . . . . . . .    north tunnel top wall, x=4..8
+          y=3  . . [ W  . . ] . . . . .    north tunnel interior; weapon at (5,3)
+          y=4  . . [## . ##] . . . . . .   north tunnel bottom wall, gap at x=6
+          y=5  . # . . . . . . . . . . .   obstacle (3,5)
+          y=6  . . . . . . # . . . . . .   central obstacle at (7,6)
+          y=7  A . . . . . # . . E . . .   agent, central obstacle (7,7), enemy (10,7)
+          y=8  . . . . . . . . # . . . .   mid-right obstacle (8,8)
+          y=9  . # . . . . . . . . ##. .   (3,9), near-goal (11,9)(12,9)
+          y=10 . . [## . ##] . . . . . .   south tunnel top wall, gap at x=6
+          y=11 . . [ . C  . ] . . . . .    south tunnel interior; camouflage at (5,11)
+          y=12 . . [####] . . . . . . .    south tunnel bottom wall, x=4..8
+          Goal at (13,9).  Enemy detection: x:10-14, y:2-7 (non-easy).
+
+        Multiple paths per style (all verified):
+          bypass     — y=1 corridor east to x=9, south to y=8, east to goal  (A)
+                       south tunnel (y=11) east to exit, north to y=8, east to goal  (B)
+                       middle zigzag at y=8 via detours around (8,8) and (11,9)     (C)
+          backstab   — exit north tunnel (9,3) → south to (9,7), toggle  (A)
+                       exit south tunnel (9,11) → north to (9,7), toggle  (B)
+          weapon     — enter north tunnel from west at (3,3)  or
+                       from north (x≤3, y=3) then east  or
+                       from south via gap at (6,4) → west to weapon;
+                       attack from (9,7) [behind] or (10,8) [below enemy]
+          camouflage — enter detection zone at y=2..3 (top edge route)
+                       enter at y=6..7 coming from below (south-side route)
+        """
+        if self.randomize_layout:
+            goal_x = width - 2
+            goal_y = random.randint(8, 10)
+            ex = random.randint(9, 11)
+            ey = random.randint(6, 8)
+            wx = random.randint(4, 7)
+            wy = 3   # always inside north tunnel
+            agent_y = random.randint(6, 8)
+        else:
+            goal_x, goal_y = width - 2, 9
+            ex, ey = 10, 7
+            wx, wy = 5, 3
+            agent_y = 7
+
+        # Place goal
+        self.goal_pos = (goal_x, goal_y)
+        self.put_obj(Goal(), goal_x, goal_y)
+
+        # Place enemy — always faces right in this layout
+        self.enemy_obj = Enemy(dir=0)
+        self.put_obj(self.enemy_obj, ex, ey)
+        self.enemy_pos = (ex, ey)
+        self.enemy_alive = True
+
+        # Place weapon inside north tunnel at y=3
+        self.put_obj(Weapon(), wx, wy)
+
+        # Place camouflage inside south tunnel at y=11 (non-easy only).
+        # wy=3 and cy=11 are different rows so no position collision is possible.
+        if not self.easy_env:
+            cx = random.randint(4, 7) if self.randomize_layout else 5
+            cy = 11
+            self.put_obj(Camouflage(), cx, cy)
+
+        # Place agent between the two tunnels
+        self.place_agent(top=(1, agent_y), size=(1, 1))
+
+        # --- Walls ---
+
+        # North tunnel top wall (solid) — forms ceiling of weapon tunnel
+        for i in range(4, 9):
+            self.put_obj(Wall(), i, 2)
+
+        # North tunnel bottom wall — gap at x=6 allows south entry into tunnel
+        for i in range(4, 9):
+            if i != 6:
+                self.put_obj(Wall(), i, 4)
+
+        # South tunnel top wall — gap at x=6 allows north entry into tunnel
+        for i in range(4, 9):
+            if i != 6:
+                self.put_obj(Wall(), i, 10)
+
+        # South tunnel bottom wall (solid) — forms floor of camouflage tunnel
+        for i in range(4, 9):
+            self.put_obj(Wall(), i, 12)
+
+        # Central vertical obstacle — forces routing north (y≤5) or south (y≥8)
+        # when approaching the enemy from the west; creates two attack lanes
+        self.put_obj(Wall(), 7, 6)
+        self.put_obj(Wall(), 7, 7)
+
+        # Mid-right obstacle — breaks the trivial straight east path at y=8
+        self.put_obj(Wall(), 8, 8)
+
+        # Left-centre obstacles — push agents toward one tunnel or the other
+        self.put_obj(Wall(), 3, 5)
+        self.put_obj(Wall(), 3, 9)
+
+        # Near-goal obstacles — force a final routing choice at the goal approach
+        self.put_obj(Wall(), 11, 9)
+        self.put_obj(Wall(), 12, 9)
+
+        self.detected = False
+        self.style_used = None
+        self.mission = (
+            "Reach the goal via one of three styles: "
+            "(1) bypass unseen, (2) backstab from behind with toggle, "
+            "(3) pick up weapon and toggle to defeat enemy."
+        )
 
     # --- Helpers --------------------------------------------------------------
 
@@ -370,7 +606,7 @@ class MiniGridThreeStyles(MiniGridEnv):
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
-        reward -= 0.005  # step penalty: comment out for Bypass mode or camouflage longer paths
+        # reward -= 0.001  # step penalty: comment out for Bypass mode or camouflage longer paths
 
         # Track metrics for control computation
         # self.step_count += 1
@@ -534,7 +770,7 @@ if __name__ == '__main__':
     import gymnasium as gym
 
     env = gym.make("MiniGrid-ThreeStyles-v0", target_style="bypass", target_bonus=1.0, non_target_penalty=-1.0,
-                   render_mode="human", easy_env=False, max_steps=100)
+                   render_mode="human", easy_env=False, max_steps=100, randomize_layout=True, layout="default")
     obs, _ = env.reset()
     ret = 0.0
     finish = False

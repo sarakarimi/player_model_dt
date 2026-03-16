@@ -33,8 +33,8 @@ from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.pdt_vae_with_p
 CONTROL_NAMES = [
     "risk_tolerance",
     "resource_pref",
-    "stealth_pref",
-    "safety_pref",
+    # "stealth_pref",
+    # "safety_pref",
     "commitment",
 ]
 STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
@@ -47,11 +47,11 @@ SAVE_DIR = os.path.dirname(__file__)
 # ---------------------------------------------------------------------------
 
 dataset_params = {
-    "sampling": False,
+    "sampling": True,
     "index_channel_only": True,
     "state_normalization_factor": 1,
     "action_normalization_factor": 1,
-    "max_len": 20,
+    "max_len": 8,
     "control_dim": len(CONTROL_NAMES),
 }
 

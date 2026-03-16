@@ -10,6 +10,44 @@ from collections import Counter
 from dataset_utils.utils import TrajectoryReader
 
 
+def controls_from_episode_summary(
+    episode_summary,
+    max_enemy_distance: float = 12.0,
+) -> np.ndarray:
+    """
+    Build a float32 control vector from an episode_summary dict produced by
+    MiniGridThreeStyles.  Returns zeros for any missing fields.
+
+    Dimensions: [risk_tolerance, resource_pref, commitment]
+    """
+    if not isinstance(episode_summary, dict):
+        episode_summary = {}
+
+    min_dist        = float(episode_summary.get("min_enemy_distance", 0.0))
+    avg_dist        = float(episode_summary.get("avg_enemy_distance", 0.0))
+    path_efficiency = float(episode_summary.get("path_efficiency",    0.0))
+    items_picked    = int(  episode_summary.get("items_picked",       0))
+    picked_weapon      = float(bool(episode_summary.get("picked_weapon",      False)))
+    picked_camouflage  = float(bool(episode_summary.get("picked_camouflage",  False)))
+
+    norm_min = np.clip(min_dist / max_enemy_distance, 0.0, 1.0)
+    norm_avg = np.clip(avg_dist / max_enemy_distance, 0.0, 1.0)
+
+    risk_tolerance = 1.0 - norm_min
+    resource_pref  = np.clip(items_picked / 2.0, 0.0, 1.0)
+    stealth_pref   = np.clip(
+        norm_avg * (1.0 - picked_weapon) + picked_camouflage * 0.9,
+        0.0, 1.0,
+    )
+    safety_pref = np.clip(norm_avg + picked_camouflage * 0.3, 0.0, 1.0)
+    commitment  = path_efficiency
+
+    return np.array(
+        [risk_tolerance, resource_pref, commitment],
+        dtype=np.float32,
+    )
+
+
 class TrajectoryDataset(Dataset):
     def __init__(
             self,
@@ -144,15 +182,15 @@ class TrajectoryDataset(Dataset):
             # modes[:, i] = 1
 
             # Sampling trajectories based on their lengths and returns
-            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=7)
-            print(top_seq_lengths)
+            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=15)
+            # print(top_seq_lengths)
             seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
 
             if self.sampling:  # Use random sampled trajectories
                 indexes = []
                 index_lists = []
                 # TODO remove hard-coded values
-                num_samples = 1000
+                num_samples = 2000
                 for seq_len in seq_lens:
                     index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
                                   len(state) == seq_len]
@@ -161,12 +199,10 @@ class TrajectoryDataset(Dataset):
                 indexes.extend(index_list_sample)
 
             else:  # Use non-random trajectories
-                num_samples = 1000
+                num_samples = 2000
                 indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
 
             print(len(indexes))
-            terminal_infos = [raw_terminal_infos[idx] if idx < len(raw_terminal_infos) else {} for idx in indexes]
-
             tasks = np.ones(len([actions[i] for i in indexes]), dtype=np.int64) * i
             states = [states[i] for i in indexes]
             actions = [actions[i] for i in indexes]
@@ -175,7 +211,11 @@ class TrajectoryDataset(Dataset):
             truncated = [truncated[i] for i in indexes]
             returns = [returns[i] for i in indexes]
             timesteps = [timesteps[i] for i in indexes]
+            terminal_infos = [raw_terminal_infos[i] for i in indexes]
             # modes = [modes[i] for i in indexes]
+
+            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=15)
+            print(top_seq_lengths)
 
             # merge datasets
             merge_actions.extend(actions)
@@ -214,6 +254,16 @@ class TrajectoryDataset(Dataset):
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
         self.infos = [i for i, m in zip(self.infos, traj_len_mask) if m]
 
+        # Build per-trajectory control vectors from episode_summary
+        self.controls = np.stack(
+            [
+                controls_from_episode_summary(
+                    ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
+                )
+                for ep_info in self.infos
+            ],
+            axis=0,
+        )  # [N, control_dim]
 
         self.traj_lens = self.traj_lens[traj_len_mask]
         self.num_timesteps = sum(self.traj_lens)

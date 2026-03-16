@@ -211,6 +211,10 @@ class OfflineTrainConfig:
     soft_prompt_enc_dec_mode: bool = False
     env_mode: int = 1
 
+    # checkpoint saving
+    model_save_path: str = None       # path to save the final model (e.g. "models/pdt.pt")
+    save_frequency: int = 0           # save every N epochs; 0 = only at end
+
     # saved style VAE model path and parameters
     vae_model_type: str = None
     vae_model_save_path: str = None
