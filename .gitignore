@@ -10,6 +10,7 @@ videos/
 *.zip
 *.hdf5
 decision_transformer/
+other_envs/
 style_decision_transformer/lstm
 /official_implementation/vector_obs/model_saved
 envs/build/lib/metalgridsolid/__init__.py
