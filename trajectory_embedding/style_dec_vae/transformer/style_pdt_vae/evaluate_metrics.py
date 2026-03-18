@@ -73,6 +73,10 @@ from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.prompt_dt impo
 from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.control_prompt_pdt import (
     ControlConditionedDT,
 )
+from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.sorl import (
+    SODataset,
+    BCPolicy as SORLPolicy,
+)
 from envs.three_style_env import MiniGridThreeStyles
 
 
@@ -544,6 +548,72 @@ class ControlDTAdapter(ModelAdapter):
 
     def train(self):
         self.model.train()
+
+
+# ---------------------------------------------------------------------------
+# SOAdapter
+# ---------------------------------------------------------------------------
+
+class SOAdapter(ModelAdapter):
+    """
+    Wraps K SORL BCPolicy models (one per discovered style).
+    Uses style_map to align discovered cluster index → ground-truth style id.
+    No per-episode conditioning — each style gets one fixed policy.
+    """
+
+    name = "SORL"
+    uses_control_vectors = False
+    supports_latent_metrics = False
+
+    def __init__(
+        self,
+        policies:   Dict[int, SORLPolicy],
+        so_dataset: SODataset,
+        device:     str = "cpu",
+        style_map:  Optional[Dict[int, int]] = None,
+    ):
+        """
+        policies:   {discovered_cluster_k: SORLPolicy}
+        so_dataset: SODataset (provides state_mean / state_std)
+        style_map:  {ground_truth_style_id -> discovered_cluster_k}
+                    Defaults to identity. Override once you know the cluster alignment
+                    from print_cluster_composition().
+        """
+        self.policies   = policies
+        self.so_dataset = so_dataset
+        self.device     = device
+        # style_map maps evaluation style_id → which SORL cluster to use
+        self._style_map = style_map if style_map is not None else {k: k for k in range(len(policies))}
+        self._policy: Optional[SORLPolicy] = None
+
+    @property
+    def state_mean(self):
+        return self.so_dataset.state_mean
+
+    @property
+    def state_std(self):
+        return self.so_dataset.state_std
+
+    def get_conditionings(self, style_id, dataset, n):
+        return [None]   # no per-episode conditioning
+
+    def prepare(self, conditioning, style_id):
+        cluster_k = self._style_map.get(style_id, style_id)
+        self._policy = self.policies[cluster_k]
+
+    def get_action(self, states, actions, rtgs, timesteps, attn_mask):
+        last_state = states[0, -1]   # [state_dim] — memoryless policy
+        with torch.no_grad():
+            logits = self._policy.forward(last_state.unsqueeze(0))
+        return int(torch.argmax(logits, dim=-1).item())
+
+    def eval(self):
+        for p in self.policies.values():
+            p.eval()
+
+    def train(self):
+        for p in self.policies.values():
+            p.train()
 
 
 # ---------------------------------------------------------------------------
@@ -1113,7 +1183,7 @@ def plot_comparison(all_metrics: dict, save_dir: str = None, std_metrics: dict =
         ax2.set_xticks(xc)
         ax2.set_xticklabels(dim_lbls, fontsize=14)
         ax2.set_ylim(0, 1.05)
-        ax2.set_ylabel("Spearman r", fontsize=10)
+        ax2.set_ylabel("Spearman r", fontsize=14)
         ax2.yaxis.grid(True, alpha=0.35)
         ax2.set_axisbelow(True)
         ax2.legend(fontsize=9)
@@ -1126,7 +1196,7 @@ def plot_comparison(all_metrics: dict, save_dir: str = None, std_metrics: dict =
 
         # MSE plot — same layout as Spearman
         fig2b, ax2b = plt.subplots(figsize=(10, 5))
-        fig2b.suptitle("Model Comparison — Control Fidelity (MSE)", fontsize=13, fontweight="bold")
+        fig2b.suptitle("Model Comparison — Control Fidelity (MSE)", fontsize=14, fontweight="bold")
 
         for i, mn in enumerate(cf_models):
             cf      = all_metrics[mn]["control_fidelity"]
@@ -1144,8 +1214,8 @@ def plot_comparison(all_metrics: dict, save_dir: str = None, std_metrics: dict =
                 _bar_label(ax2b, bar, val, fmt=".3f")
 
         ax2b.set_xticks(xc)
-        ax2b.set_xticklabels(dim_lbls, fontsize=9)
-        ax2b.set_ylabel("MSE (lower = better)", fontsize=10)
+        ax2b.set_xticklabels(dim_lbls, fontsize=14)
+        ax2b.set_ylabel("MSE (lower = better)", fontsize=14)
         ax2b.yaxis.grid(True, alpha=0.35)
         ax2b.set_axisbelow(True)
         ax2b.legend(fontsize=9)
@@ -1332,7 +1402,27 @@ if __name__ == "__main__":
     adapters["PromptDT"] = PromptDTAdapter(prompt_model, dataset, prompt_length=prompt_len, device=DEVICE)
 
 
-    # 4. ControlDT
+    # 4. SORL
+    so_dataset = SODataset(
+        trajectory_paths=paths,
+        sampling=True,
+        index_channel_only=True,
+    )
+    sorl_policies: Dict[int, SORLPolicy] = {}
+    for k in range(3):
+        p = SORLPolicy(state_dim=9, act_dim=7, hidden_size=256, num_layers=3)
+        ckpt = os.path.join(HERE, f"trained_models/sorl_bc_style{k}.pth")
+        if os.path.exists(ckpt):
+            p.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+            print(f"Loaded SORL style {k}: {ckpt}")
+        else:
+            print(f"SORL checkpoint not found: {ckpt} — using random weights.")
+        p.to(DEVICE)
+        sorl_policies[k] = p
+    # style_map: adjust if print_cluster_composition() shows misaligned clusters
+    adapters["SORL"] = SOAdapter(sorl_policies, so_dataset, device=DEVICE)
+
+    # 5. ControlDT
     ctrl_model = ControlConditionedDT(
         state_dim=9, act_dim=7, hidden_size=128,
         control_dim=control_dim, max_length=context_len, max_ep_len=100,

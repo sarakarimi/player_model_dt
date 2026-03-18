@@ -97,6 +97,8 @@ class SODataset(Dataset):
         flat_a_list       = []
         flat_tid_list     = []
 
+        true_tasks_list = []
+
         for dataset_i, traj_i in enumerate(base.indices):
             s_raw = base.states[traj_i]
             a_raw = base.actions[traj_i]
@@ -119,6 +121,7 @@ class SODataset(Dataset):
             traj_states_list.append(s_norm)
             traj_actions_list.append(a_flat)
             traj_returns_list.append(total_return)
+            true_tasks_list.append(int(base.tasks[traj_i]))
 
             flat_s_list.append(s_norm)
             flat_a_list.append(a_flat)
@@ -129,6 +132,7 @@ class SODataset(Dataset):
         self.traj_states  = traj_states_list
         self.traj_actions = traj_actions_list
         self.traj_returns = np.array(traj_returns_list, dtype=np.float32)
+        self.true_tasks   = np.array(true_tasks_list,   dtype=np.int64)
         self.num_trajectories = len(traj_states_list)
 
         self.flat_states   = np.concatenate(flat_s_list,  axis=0)   # [N_steps, S]
@@ -483,6 +487,7 @@ def train_sorl(
 
         # ── Optional online evaluation ──────────────────────────────────────
         if eval_every > 0 and (em_iter + 1) % eval_every == 0:
+            print_cluster_composition(policies, dataset, device=device)
             print(f"  Online evaluation at EM iter {em_iter + 1} …")
             eval_res = evaluate_sorl(
                 policies=policies,
@@ -594,6 +599,35 @@ def evaluate_sorl(
 # Plotting
 # =============================================================================
 
+def print_cluster_composition(
+    policies: list,
+    dataset:  SODataset,
+    device:   str = "cpu",
+) -> np.ndarray:
+    """
+    Print the ground-truth style composition of each discovered SORL cluster.
+    Useful for diagnosing EM collapse and checking index alignment.
+    Returns the hard assignment array [N].
+    """
+    W           = compute_soft_assignments(policies, dataset, device=device)
+    hard_assign = W.argmax(axis=1)                        # [N] discovered cluster
+    true_labels = dataset.true_tasks                      # [N] ground-truth style
+    K           = len(policies)
+    style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+
+    print("\n=== SORL Cluster Composition (ground-truth style counts per cluster) ===")
+    print(f"{'cluster':<10}" + "".join(f"{style_names[s]:>12}" for s in range(3)) + f"{'total':>10}  {'dominant':>12}")
+    for k in range(K):
+        mask   = hard_assign == k
+        counts = np.bincount(true_labels[mask], minlength=3)
+        dom    = style_names.get(int(counts.argmax()), "?")
+        print(f"  {k:<8}" + "".join(f"{counts[s]:>12}" for s in range(3)) + f"{mask.sum():>10}  {dom:>12}")
+
+    mean_ent = float(-(W * np.log(W + 1e-8)).sum(axis=1).mean())
+    print(f"\n  Mean assignment entropy = {mean_ent:.4f}  (0=hard, ln(K)={np.log(K):.3f}=uniform)")
+    return hard_assign
+
+
 def _plot_eval_history(eval_history: dict, save_path: str = "eval_results_sorl.png"):
     K     = len([k for k in eval_history if k.startswith("style_")])
     iters = eval_history["em_iter"]
@@ -646,7 +680,7 @@ if __name__ == "__main__":
         value_net = train_value_network(
             value_net=value_net,
             dataset=dataset,
-            num_epochs=30,
+            num_epochs=100,
             batch_size=256,
             lr=1e-3,
             device=device,
@@ -670,7 +704,7 @@ if __name__ == "__main__":
             policies=policies,
             value_net=value_net,
             dataset=dataset,
-            num_em_iters=15,
+            num_em_iters=100,
             m_step_epochs=5,
             batch_size=256,
             lr=1e-3,
@@ -686,6 +720,9 @@ if __name__ == "__main__":
             num_eval_ep=10,
             max_ep_len=100,
         )
+
+    # --- Cluster composition -----------------------------------------------
+    print_cluster_composition(policies, dataset, device=device)
 
     # --- Final evaluation --------------------------------------------------
     print("\n=== Final SORL Evaluation ===")
