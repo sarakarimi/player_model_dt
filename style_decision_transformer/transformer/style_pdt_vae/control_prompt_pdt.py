@@ -31,9 +31,9 @@ import transformers
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
-from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset, controls_from_episode_summary
+from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
+from style_decision_transformer import paths
 from trajectory_gpt2 import GPT2Model
 
 

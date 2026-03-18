@@ -13,10 +13,7 @@ from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from decision_transformer.style_enc_decision_transformer_dec import VariationalStyleDecisionTransformer
 from eval_enc_dec import evaluate_dt_agent
 from util import configure_optimizers, get_scheduler
-from style_decision_transformer import (
-    TrajectoryTransformer,
-)
-from trajectory_embedding.style_dec_vae.lstm.style_vae import cluster_latents, plot_embeddings
+from style_decision_transformer.lstm.style_vae import cluster_latents, plot_embeddings
 
 
 def train_enc_dec(

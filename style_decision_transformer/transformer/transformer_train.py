@@ -3,13 +3,12 @@ import numpy as np
 import torch.nn.functional as F
 from sklearn.mixture import GaussianMixture
 from style_transformer_dec import TransformerVaDE, TransformerAE
-from trajectory_embedding.style_dec_vae.configs.config_mujoco import *
 # from trajectory_embedding.style_dec_vae.config import paths
-from trajectory_embedding.style_dec_vae.transformer.style_transformer_vae import create_padding_mask
+from style_decision_transformer.transformer.style_transformer_vae import create_padding_mask
 # from trajectory_embedding.style_dec_vae.utils.dataset import MiniGridDataset, collate_fn
-from trajectory_embedding.style_dec_vae.utils.dataset_mujoco import MujocoDataset, collate_fn
+from style_decision_transformer.utils import MujocoDataset, collate_fn
 
-from trajectory_embedding.style_dec_vae.utils.utils import cluster_accuracy, plot_embeddings
+from style_decision_transformer.utils import cluster_accuracy, plot_embeddings
 import argparse
 import torch.utils.data
 from torch import nn

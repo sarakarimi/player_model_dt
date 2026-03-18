@@ -39,7 +39,7 @@ def collate_fn(batch):
 
 
 if __name__ == '__main__':
-    from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
+    from style_decision_transformer import paths
     import pandas
     import seaborn as sns
     import matplotlib.pyplot as plt

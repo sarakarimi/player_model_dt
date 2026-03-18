@@ -20,15 +20,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 sys.path.insert(0, REPO_ROOT)
 
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer import paths
+from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior import (
     MiniGridDataset,
     StyleVAEPromptDT,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.control_prompt_pdt import (
+from style_decision_transformer.transformer.style_pdt_vae.control_prompt_pdt import (
     ControlConditionedDT,
     CONTROL_DIM,
 )

@@ -1,6 +1,6 @@
 
 import random
-from typing import Callable, Tuple, Dict, Optional
+from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,8 +14,8 @@ from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
 
 
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
-from trajectory_embedding.style_dec_vae.lstm.style_vae import cluster_latents, plot_embeddings
+from style_decision_transformer import paths
+from style_decision_transformer.lstm.style_vae import cluster_latents, plot_embeddings
 from trajectory_gpt2 import GPT2Model
 
 

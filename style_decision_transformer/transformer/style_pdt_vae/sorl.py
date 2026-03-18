@@ -30,7 +30,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
+from style_decision_transformer import paths
 
 
 # ---------------------------------------------------------------------------

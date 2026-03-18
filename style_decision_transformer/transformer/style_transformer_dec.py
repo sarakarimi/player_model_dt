@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
-from trajectory_embedding.style_dec_vae.transformer.style_transformer_vae import Encoder, Decoder
+from style_decision_transformer.transformer import Encoder, Decoder
 
 
 class TransformerVaDE(nn.Module):

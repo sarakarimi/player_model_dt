@@ -1,7 +1,7 @@
 from typing import Callable
 import numpy as np
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
-from trajectory_embedding.style_dec_vae.lstm.eval import predict_clusters_vae
+from style_decision_transformer.lstm.eval import predict_clusters_vae
 import random
 import torch
 
@@ -186,8 +186,6 @@ class SoftPromptDataset(TrajectoryDataset):
 
 
 if __name__ == '__main__':
-    from trajectory_embedding.style_dec_vae.configs.config_minigrid import *
-
     paths = [
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_backstab.gz",
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_bypass.gz",

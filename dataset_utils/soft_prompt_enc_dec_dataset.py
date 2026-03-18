@@ -256,8 +256,6 @@ class SoftPromptEncDecDataset(TrajectoryDataset):
 
 
 if __name__ == '__main__':
-    from trajectory_embedding.style_dec_vae.configs.config_minigrid import *
-
     paths = [
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_backstab.gz",
         "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env/PPO_trajectories_PPO_trajectories_three_style_env_bypass.gz",

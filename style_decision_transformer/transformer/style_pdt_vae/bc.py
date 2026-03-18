@@ -13,7 +13,7 @@ Mirrors prompt_dt.py / control_prompt_pdt.py in dataset, evaluation, and
 __main__ structure for direct comparison.
 """
 
-from typing import Callable, Dict, Optional, Tuple
+from typing import Dict, Tuple
 import os
 
 import matplotlib.pyplot as plt
@@ -25,7 +25,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
+from style_decision_transformer import paths
 
 
 STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
@@ -393,7 +393,7 @@ if __name__ == "__main__":
         lr=1e-3,
         device=device,
         log_every=10,
-        save_dir=".",
+        save_dir="",
         index_channel_only=True,
         state_normalization_factor=1,
         action_normalization_factor=1,

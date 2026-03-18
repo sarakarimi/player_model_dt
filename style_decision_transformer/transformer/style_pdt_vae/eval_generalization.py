@@ -17,7 +17,6 @@ Usage:
 
 import json
 import os
-import random
 from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
@@ -27,8 +26,8 @@ import torch
 # ---------------------------------------------------------------------------
 # Import shared infrastructure
 # ---------------------------------------------------------------------------
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.evaluate_metrics import (
+from style_decision_transformer import paths
+from style_decision_transformer.transformer.style_pdt_vae.evaluate_metrics import (
     CONTROL_NAMES,
     CONTROL_OUTCOME_MAP,
     MAX_ENEMY_DIST,
@@ -37,11 +36,11 @@ from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.evaluate_metri
     _rollout_episode,
     set_global_seeds,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.control_prompt_pdt import (
+from style_decision_transformer.transformer.style_pdt_vae.control_prompt_pdt import (
     ControlConditionedDT,
     CONTROL_DIM,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior import (
     StyleVAEPromptDT,
 )
 from envs.three_style_env import MiniGridThreeStyles

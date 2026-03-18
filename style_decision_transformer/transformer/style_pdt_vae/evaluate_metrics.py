@@ -41,13 +41,12 @@ Or import and call run_full_evaluation(adapter, dataset) for programmatic use.
 
 import os
 import sys
-import json
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
@@ -58,22 +57,21 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer import paths
+from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior import (
     MiniGridDataset,
     StyleVAEPromptDT,
     kl_q_p_diag,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.bc import BCPolicy
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.prompt_dt import (
+from style_decision_transformer.transformer.style_pdt_vae.bc import BCPolicy
+from style_decision_transformer.transformer.style_pdt_vae.prompt_dt import (
     PromptingDecisionTransformer,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.control_prompt_pdt import (
+from style_decision_transformer.transformer.style_pdt_vae.control_prompt_pdt import (
     ControlConditionedDT,
 )
-from trajectory_embedding.style_dec_vae.transformer.style_pdt_vae.sorl import (
+from style_decision_transformer.transformer.style_pdt_vae.sorl import (
     SODataset,
     BCPolicy as SORLPolicy,
 )

@@ -18,11 +18,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from dataset_utils.minigrid_vae_dataset import MiniGridDataset, collate_fn
-from trajectory_embedding.style_dec_vae.configs.config_minigrid import paths
-from trajectory_embedding.style_dec_vae.lstm.style_vae import cluster_latents, plot_embeddings
+from style_decision_transformer import paths
+from style_decision_transformer.lstm.style_vae import cluster_latents, plot_embeddings
 
 
 def beta_cyclical(
