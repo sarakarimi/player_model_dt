@@ -9,14 +9,15 @@ import torch.nn as nn
 import transformers
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
+from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
-
-
-from style_decision_transformer import paths
-from style_decision_transformer.lstm.style_vae import cluster_latents, plot_embeddings
+from style_decision_transformer.style_pdt_vae.paths import paths
+from style_decision_transformer.utils.utils import cluster_latents, plot_embeddings
 from trajectory_gpt2 import GPT2Model
+
+# style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 
 
 # =============================================================================
@@ -279,6 +280,7 @@ class DecisionTransformer(nn.Module):
         if attention_mask is None:
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=states.device)
 
+        states = states.reshape(batch_size, seq_length, -1)
         state_embeddings = self.embed_state(states)
 
         if actions.ndim == 3:
@@ -399,7 +401,8 @@ class StyleVAEPromptDT(nn.Module):
         full_timesteps: torch.Tensor,
         full_attn_mask: torch.Tensor,
     ):
-        batch_size, seq_len, _ = full_states.shape
+        batch_size, seq_len = full_states.shape[0], full_states.shape[1]
+        # full_states = full_states.reshape(batch_size, seq_len, -1)
 
         s_emb = self.dt.embed_state(full_states)
 
@@ -508,22 +511,21 @@ def train_style_prompt_dt(
     log_every: int = 10,
     save_path: str = None,
     eval_every: int = 10,
-    eval_episodes_per_style: int = 10,
+    eval_episodes_per_style: int = 50,
     max_ep_len: int = 100,
-    initial_rtg: float = 1.0,
+    initial_rtg: float = 2.1,
     beta_warmup_epochs: int = 0,
 ):
     model.to(device)
     model.train()
     optimizer = AdamW(model.parameters(), lr=lr)
 
-    # Track evaluation results
-    eval_history = {
-        "epochs": [],
-        "style_0": [],
-        "style_1": [],
-        "style_2": [],
-    }
+    # Track evaluation results. `style_{id}` holds the success rate (primary
+    # metric, the curve we plot); `style_{id}_return` keeps the mean return.
+    eval_history = {"epochs": []}
+    for style_id in range(len(style_names)):
+        eval_history[f"style_{style_id}"] = []
+        eval_history[f"style_{style_id}_return"] = []
 
     for epoch in range(num_epochs):
         if beta_warmup_epochs > 0:
@@ -614,25 +616,27 @@ def train_style_prompt_dt(
         # Online evaluation every eval_every epochs
         if eval_every > 0 and (epoch + 1) % eval_every == 0:
             print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
-            eval_results = evaluate_online_controls(
+            eval_results, eval_success = evaluate_online_controls(
                 model=model,
                 dataset=dataloader.dataset,
-                num_styles=3,
+                num_styles=len(style_names),
                 num_episodes_per_style=eval_episodes_per_style,
                 max_ep_len=max_ep_len,
                 device=device,
                 initial_rtg=initial_rtg,
                 env_kwargs=None,
                 deterministic_prior=False,
-                max_context=20,
+                max_context=None,  # match the training window length
             )
 
 
-            # Record results
+            # Record results: success rate (primary) and mean return.
             eval_history["epochs"].append(epoch + 1)
-            for style_id in range(3):
+            for style_id in range(len(style_names)):
+                success_rate = np.mean(eval_success[style_id]) if eval_success[style_id] else 0.0
                 mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
-                eval_history[f"style_{style_id}"].append(mean_return)
+                eval_history[f"style_{style_id}"].append(success_rate)
+                eval_history[f"style_{style_id}_return"].append(mean_return)
 
             print()
 
@@ -658,10 +662,10 @@ def evaluate_online_controls(
     num_episodes_per_style: int = 10,
     max_ep_len: int = 100,
     device: str = "cpu",
-    initial_rtg: float = 1.0,
+    initial_rtg: float = 2.1,
     env_kwargs: dict = None,
     deterministic_prior: bool = True,
-    max_context: int = 20,
+    max_context: int = None,
 ):
     """
     Online evaluation for the *controls-conditioned prior* model.
@@ -676,21 +680,26 @@ def evaluate_online_controls(
       results: dict {style_id: [episode_returns]}
     """
     model.eval()
+    # Match eval rollout context to the training window length, so the DT never
+    # has to extrapolate past the sequence lengths it was trained on.
+    if max_context is None:
+        max_context = model.dt.max_length
     if env_kwargs is None:
         env_kwargs = {}
-
-    # style id -> env target style name (only for spawning env variants)
-    style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+        env_kwargs["max_steps"] = 100
 
     # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
     # Fallback when dataset has no controls stored (should not happen with new datasets).
-    fallback_style_to_controls = {
-        0: np.array([0.67, 0.01, 0.53, 0.53, 0.82], dtype=np.float32),  # bypass
-        1: np.array([0.92, 0.51, 0.00, 0.00, 0.59], dtype=np.float32),  # weapon
-        2: np.array([0.92, 0.53, 1.00, 0.63, 0.74], dtype=np.float32),  # camouflage
-    }
-
+    # fallback_style_to_controls = {
+    #     0: np.array([0.67, 0.01, 0.53, 0.53, 0.82], dtype=np.float32),  # bypass
+    #     1: np.array([0.92, 0.51, 0.00, 0.00, 0.59], dtype=np.float32),  # weapon
+    #     2: np.array([0.92, 0.53, 1.00, 0.63, 0.74], dtype=np.float32),  # camouflage
+    # }
+    if len(style_names) != 3:
+        num_styles = len(style_names)
     results = {style_id: [] for style_id in range(num_styles)}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {style_id: [] for style_id in range(num_styles)}
 
     # state normalization tensors
     state_mean = torch.tensor(dataset.state_mean, device=device, dtype=torch.float32)
@@ -719,22 +728,40 @@ def evaluate_online_controls(
 
             # rollout episodes
             for ep in range(num_episodes_per_style):
-                env = MiniGridThreeStyles(
-                    target_style=style_names[style_id],
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    randomize_layout=True,
-                    **env_kwargs
-                )
+                if len(style_names) == 3:
+                    env = MiniGridThreeStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        easy_env=False,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        **env_kwargs
+                    )
+                else:
+                    env = MiniGridMultiStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        free_item_placement=True,
+                        **env_kwargs,
+                    )
 
                 obs, _ = env.reset(seed=42 + ep)
                 # env.render()
 
                 # state: object index channel 0, flattened, normalized like training
-                state = torch.from_numpy(obs["image"][:, :, 0].flatten()).float().to(device)
-                state = (state - state_mean) / state_std
+
+                if len(style_names) == 3:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(device)
+                else:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(device)
+                state = (state - state_mean.flatten()) / state_std.flatten()
 
                 states = state.reshape(1, 1, -1)
                 actions = torch.zeros((1, 1, 1), dtype=torch.long, device=device)
@@ -766,8 +793,12 @@ def evaluate_online_controls(
                     t += 1
 
                     if not done:
-                        next_state = torch.from_numpy(next_obs["image"][:, :, 0].flatten()).float().to(device)
-                        next_state = (next_state - state_mean) / state_std
+                        if len(style_names) == 3:
+                            next_state = torch.from_numpy(next_obs["image"][:, :, 0].flatten()).float().to(device)
+                        else:
+                            next_state = torch.from_numpy(next_obs["image"][:, :, 0].flatten()).float().to(device)
+
+                        next_state = (next_state - state_mean.flatten()) / state_std.flatten()
 
                         states = torch.cat([states, next_state.reshape(1, 1, -1)], dim=1)
                         actions = torch.cat(
@@ -791,16 +822,25 @@ def evaluate_online_controls(
                             timesteps = timesteps[:, -max_context:]
 
                 results[style_id].append(episode_return)
+                # An episode succeeds only if it reached the goal AND the style
+                # the env actually registered matches the requested target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[style_id].append(
+                    1.0 if achieved == style_names[style_id] else 0.0
+                )
                 env.close()
 
             print(
                 f"[controls->prior] Style {style_id} ({style_names[style_id]}): "
-                f"mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f} "
+                f"success = {np.mean(success[style_id]):.2f} "
+                f"| mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f} "
                 f"| deterministic_prior={deterministic_prior}"
             )
 
     model.train()
-    return results
+    return results, success
 
 
 # =============================================================================
@@ -808,28 +848,47 @@ def evaluate_online_controls(
 # =============================================================================
 
 def plot_eval_results(eval_history: dict, save_path: str = "style_dt_eval_results.png"):
-    """Plot the online evaluation results for each style over training."""
-    epochs = eval_history["epochs"]
-    style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
+    """Plot the online evaluation results for each style over training.
 
-    # Combined plot with all styles
+    Primary plot is the per-style success rate (achieved_style == target_style),
+    which is far less noisy than mean return. A companion `*_return.png` plot of
+    mean return is also saved when return history is available.
+    """
+    epochs = eval_history["epochs"]
+
+    # Success-rate plot (primary metric)
     plt.figure(figsize=(10, 6))
-    for style_id in range(3):
-        returns = eval_history[f"style_{style_id}"]
-        plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+    for style_id in range(len(style_names)):
+        rates = eval_history[f"style_{style_id}"]
+        plt.plot(epochs, rates, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
 
     plt.xlabel("Epoch", fontsize=12)
-    plt.ylabel("Mean Episode Return", fontsize=12)
-    plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
+    plt.ylim(-0.02, 1.02)
+    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
     plt.legend(fontsize=10)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-
     plt.savefig(save_path, dpi=150)
     print(f"Saved combined evaluation plot to {save_path}")
     plt.close()
 
-    plt.close()
+    # Companion return plot, if returns were tracked
+    if any(f"style_{s}_return" in eval_history for s in range(len(style_names))):
+        ret_path = save_path.replace(".png", "_return.png")
+        plt.figure(figsize=(10, 6))
+        for style_id in range(len(style_names)):
+            returns = eval_history.get(f"style_{style_id}_return", [])
+            plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Mean Episode Return", fontsize=12)
+        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(ret_path, dpi=150)
+        print(f"Saved return evaluation plot to {ret_path}")
+        plt.close()
 
 
 # =============================================================================
@@ -840,6 +899,12 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    # Training window must span the full trajectory: the styles require acting on
+    # an earlier action (e.g. weapon pickup) ~13 steps before its use (toggle),
+    # and "carrying" is not in the observation — the only memory channel is the
+    # action history inside the context window. Trajectories are ~30-39 steps and
+    # the pickup->toggle gap reaches 31, so an 8-step window can never contain
+    # both, which is why non-bypass styles never improve. 40 covers every traj.
     max_len = 8
     control_dim = 3
     dataset_params = {
@@ -903,6 +968,6 @@ if __name__ == "__main__":
             y_true.extend(batch["task_labels"].cpu().numpy().tolist())
 
     Z = torch.cat(Z, 0).cpu().numpy()
-    predicted_labels, _ = cluster_latents(Z, 3)
+    predicted_labels, _ = cluster_latents(Z, len(style_names))
     plot_embeddings(gtruth=predicted_labels, Z=Z, label_name="task_predicted")
     plot_embeddings(gtruth=y_true, Z=Z, label_name="task_ground_truth")

@@ -27,10 +27,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
-
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
-from style_decision_transformer import paths
+from style_decision_transformer.style_pdt_vae.paths import paths
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +349,7 @@ def train_sorl(
     save_dir:         str   = "trained_models",
     warmup_bc_epochs: int   = 5,
     eval_every:       int   = 2,
-    num_eval_ep:      int   = 10,
+    num_eval_ep:      int   = 50,
     initial_rtg:      float = 1.0,
     max_ep_len:       int   = 100,
 ) -> list:
@@ -417,7 +416,12 @@ def train_sorl(
             print(f"  [WarmUp] Epoch {ep+1}/{warmup_bc_epochs}  avg_loss={avgs}")
 
     # ── EM loop ───────────────────────────────────────────────────────────────
-    eval_history = {"em_iter": [], "style_0": [], "style_1": [], "style_2": []}
+    # `style_{k}` holds the success rate (primary metric, the curve we plot);
+    # `style_{k}_return` keeps the mean return.
+    eval_history = {"em_iter": []}
+    for k in range(K):
+        eval_history[f"style_{k}"] = []
+        eval_history[f"style_{k}_return"] = []
 
     # Initial W: uniform
     W = np.full((dataset.num_trajectories, K), 1.0 / K, dtype=np.float32)
@@ -489,18 +493,21 @@ def train_sorl(
         if eval_every > 0 and (em_iter + 1) % eval_every == 0:
             print_cluster_composition(policies, dataset, device=device)
             print(f"  Online evaluation at EM iter {em_iter + 1} …")
-            eval_res = evaluate_sorl(
+            eval_results, eval_success = evaluate_sorl(
                 policies=policies,
                 dataset=dataset,
                 num_episodes_per_style=num_eval_ep,
                 max_ep_len=max_ep_len,
                 device=device,
             )
+            # Record results: success rate (primary) and mean return.
             eval_history["em_iter"].append(em_iter + 1)
             for k in range(K):
-                mean_r = float(np.mean(eval_res[k])) if eval_res[k] else 0.0
-                eval_history[f"style_{k}"].append(mean_r)
-                print(f"    style_{k}: mean_r={mean_r:.3f}")
+                success_rate = float(np.mean(eval_success[k])) if eval_success[k] else 0.0
+                mean_r = float(np.mean(eval_results[k])) if eval_results[k] else 0.0
+                eval_history[f"style_{k}"].append(success_rate)
+                eval_history[f"style_{k}_return"].append(mean_r)
+                print(f"    style_{k}: success={success_rate:.2f} mean_r={mean_r:.3f}")
 
         if save_dir is not None:
             os.makedirs(save_dir, exist_ok=True)
@@ -528,7 +535,7 @@ def evaluate_sorl(
     initial_rtg:            float = 1.0,   # unused; kept for API symmetry
     env_kwargs:             dict  = None,
     style_map:              dict  = None,
-) -> dict:
+) -> tuple:
     """
     Roll out each discovered BC policy online.
 
@@ -537,7 +544,9 @@ def evaluate_sorl(
     Defaults to identity {k: k}.  After training, inspect W to identify the
     correspondence and pass the correct mapping here.
 
-    Returns {k: [episode_returns]}.
+    Returns (results, success):
+      results — {k: [episode_returns]}
+      success — {k: [1.0/0.0 success flags]} (achieved_style == target_style)
     """
     K = len(policies)
     if env_kwargs is None:
@@ -549,6 +558,8 @@ def evaluate_sorl(
     state_std  = torch.tensor(dataset.state_std,  dtype=torch.float32, device=device)
 
     results = {k: [] for k in range(K)}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {k: [] for k in results}
 
     for k, policy in enumerate(policies):
         policy.eval()
@@ -578,21 +589,30 @@ def evaluate_sorl(
                     state = (state - state_mean) / state_std
 
                     action = policy.get_action(state)
-                    obs, reward, terminated, truncated, _ = env.step(action)
+                    obs, reward, terminated, truncated, info = env.step(action)
                     done = terminated or truncated
                     episode_return += float(reward)
                     t += 1
 
                 results[k].append(episode_return)
+                # An episode succeeds only if the style the env actually
+                # registered matches the requested target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[k].append(
+                    1.0 if achieved == STYLE_NAMES[env_style_id] else 0.0
+                )
                 env.close()
 
         print(
             f"[SORL] Style {k} → env style {env_style_id} ({STYLE_NAMES[env_style_id]}): "
-            f"mean={np.mean(results[k]):.3f} ± {np.std(results[k]):.3f}"
+            f"success = {np.mean(success[k]):.2f} "
+            f"| mean={np.mean(results[k]):.3f} ± {np.std(results[k]):.3f}"
         )
         policy.train()
 
-    return results
+    return results, success
 
 
 # =============================================================================
@@ -629,8 +649,16 @@ def print_cluster_composition(
 
 
 def _plot_eval_history(eval_history: dict, save_path: str = "eval_results_sorl.png"):
-    K     = len([k for k in eval_history if k.startswith("style_")])
+    """Plot the online evaluation results for each discovered style over training.
+
+    Primary plot is the per-style success rate (achieved_style == target_style),
+    which is far less noisy than mean return. A companion `*_return.png` plot of
+    mean return is also saved when return history is available.
+    """
+    K     = len([k for k in eval_history if k.startswith("style_") and not k.endswith("_return")])
     iters = eval_history["em_iter"]
+
+    # Success-rate plot (primary metric)
     plt.figure(figsize=(10, 6))
     for k in range(K):
         plt.plot(
@@ -639,14 +667,35 @@ def _plot_eval_history(eval_history: dict, save_path: str = "eval_results_sorl.p
             label=f"SORL Style {k}",
         )
     plt.xlabel("EM Iteration", fontsize=12)
-    plt.ylabel("Mean Episode Return", fontsize=12)
-    plt.title("SORL — Online Evaluation Returns by Discovered Style", fontsize=14)
+    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
+    plt.ylim(-0.02, 1.02)
+    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
     plt.legend(fontsize=10)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
     print(f"Saved {save_path}")
     plt.close()
+
+    # Companion return plot, if returns were tracked
+    if any(f"style_{k}_return" in eval_history for k in range(K)):
+        ret_path = save_path.replace(".png", "_return.png")
+        plt.figure(figsize=(10, 6))
+        for k in range(K):
+            plt.plot(
+                iters, eval_history.get(f"style_{k}_return", []),
+                marker="o", linewidth=2,
+                label=f"SORL Style {k}",
+            )
+        plt.xlabel("EM Iteration", fontsize=12)
+        plt.ylabel("Mean Episode Return", fontsize=12)
+        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(ret_path, dpi=150)
+        print(f"Saved {ret_path}")
+        plt.close()
 
 
 # =============================================================================
@@ -717,7 +766,7 @@ if __name__ == "__main__":
             save_dir=SAVE_DIR,
             warmup_bc_epochs=5,
             eval_every=3,
-            num_eval_ep=10,
+            num_eval_ep=50,
             max_ep_len=100,
         )
 
@@ -726,15 +775,16 @@ if __name__ == "__main__":
 
     # --- Final evaluation --------------------------------------------------
     print("\n=== Final SORL Evaluation ===")
-    results = evaluate_sorl(
+    results, success = evaluate_sorl(
         policies=policies,
         dataset=dataset,
-        num_episodes_per_style=20,
+        num_episodes_per_style=50,
         max_ep_len=100,
         device=device,
     )
     for k in range(NUM_STYLES):
         print(
-            f"  Style {k}: mean={np.mean(results[k]):.3f}"
+            f"  Style {k}: success={np.mean(success[k]):.2f}"
+            f" | mean={np.mean(results[k]):.3f}"
             f" ± {np.std(results[k]):.3f}"
         )

@@ -26,21 +26,21 @@ import torch
 # ---------------------------------------------------------------------------
 # Import shared infrastructure
 # ---------------------------------------------------------------------------
-from style_decision_transformer import paths
-from style_decision_transformer.transformer.style_pdt_vae.evaluate_metrics import (
+from style_decision_transformer.style_pdt_vae.paths import paths
+from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import MiniGridDataset
+from style_decision_transformer.utils.evaluate_metrics import (
     CONTROL_NAMES,
     CONTROL_OUTCOME_MAP,
     MAX_ENEMY_DIST,
     EpisodeRecord,
-    MiniGridDataset,
     _rollout_episode,
     set_global_seeds,
 )
-from style_decision_transformer.transformer.style_pdt_vae.control_prompt_pdt import (
+from style_decision_transformer.style_pdt_vae.control_prompt_pdt import (
     ControlConditionedDT,
     CONTROL_DIM,
 )
-from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
     StyleVAEPromptDT,
 )
 from envs.three_style_env import MiniGridThreeStyles

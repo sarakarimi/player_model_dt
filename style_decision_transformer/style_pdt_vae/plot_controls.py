@@ -21,8 +21,8 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
 
-from style_decision_transformer import paths
-from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer.style_pdt_vae.paths import paths
+from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
     MiniGridDataset,
 )
 
@@ -30,15 +30,21 @@ from style_decision_transformer.transformer.style_pdt_vae.pdt_vae_with_prior imp
 # Config
 # ---------------------------------------------------------------------------
 
+# CONTROL_NAMES = [
+#     "risk_tolerance",
+#     "resource_pref",
+#     # "stealth_pref",
+#     # "safety_pref",
+#     "commitment",
+# ]
 CONTROL_NAMES = [
-    "risk_tolerance",
-    "resource_pref",
-    # "stealth_pref",
-    # "safety_pref",
-    "commitment",
+    "risk_taking", "stealth_exposure", "route_directness"
 ]
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
-STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}  # blue, orange, green
+# STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
+STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+
+# STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}  # blue, orange, green
+STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#000000"}  # blue, orange, green, black
 
 SAVE_DIR = os.path.dirname(__file__)
 

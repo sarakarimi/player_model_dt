@@ -28,6 +28,7 @@ if __name__ == "__main__":
         device=run_config.device,
         env_mode=args.mode,
         easy_env=args.easy_env,
+        bypass_corridor=args.bypass_corridor,
     )
 
     online_config = OnlineTrainConfig(

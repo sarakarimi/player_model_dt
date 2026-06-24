@@ -24,11 +24,13 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
+from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
-from style_decision_transformer import paths
+from style_decision_transformer.style_pdt_vae.paths import paths
 
 
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
+# STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"} # three style env
+STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 
 
 # =============================================================================
@@ -195,7 +197,12 @@ def train_bc_style(
     )
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
-    state_dim_flat = dataset.states.shape[1]
+    if len(STYLE_NAMES) == 3:
+        state_dim_flat = dataset.states.shape[1]
+    else:
+        state_dim_flat = dataset.states.shape[1]
+
+        # state_dim_flat = int(np.prod(dataset.states.shape[1:]))
     policy = BCPolicy(
         state_dim=state_dim_flat,
         act_dim=act_dim,
@@ -259,7 +266,7 @@ def train_all_styles(
         policies: {style_id: (policy, dataset)}
     """
     policies = {}
-    for style_id in range(3):
+    for style_id in range(len(STYLE_NAMES)):
         print(f"\n=== Training BC for Style {style_id} ({STYLE_NAMES[style_id]}) ===")
         save_path = os.path.join(save_dir, f"trained_models/bc_style{style_id}.pth")
         policy, dataset = train_bc_style(
@@ -302,8 +309,11 @@ def evaluate_bc_oracle(
     """
     if env_kwargs is None:
         env_kwargs = {}
+        env_kwargs["max_steps"] = 100
 
     results = {s: [] for s in policies}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {s: [] for s in policies}
 
     for style_id, (policy, dataset) in policies.items():
         policy.eval()
@@ -312,61 +322,95 @@ def evaluate_bc_oracle(
 
         with torch.no_grad():
             for ep in range(num_episodes_per_style):
-                env = MiniGridThreeStyles(
-                    target_style=STYLE_NAMES[style_id],
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    randomize_layout=True,
-                    **env_kwargs,
-                )
+                if len(STYLE_NAMES) == 3:
+                    env = MiniGridThreeStyles(
+                        target_style=STYLE_NAMES[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        easy_env=False,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        **env_kwargs,
+                    )
+                else:
+                    env = MiniGridMultiStyles(
+                        target_style=STYLE_NAMES[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        free_item_placement=True,
+                        **env_kwargs,
+                    )
+
                 obs, _ = env.reset(seed=42 + ep)
 
                 episode_return = 0.0
                 done = False
                 t    = 0
+                info = {}
 
                 while not done and t < max_ep_len:
-                    state = torch.from_numpy(
-                        obs["image"][:, :, 0].flatten()
-                    ).float().to(eval_device)
+                    if len(STYLE_NAMES) == 3:
+                        state = torch.from_numpy(
+                            obs["image"][:, :, 0].flatten()
+                        ).float().to(eval_device)
+                    else:
+                        state = torch.from_numpy(
+                            obs["image"][:, :, 0].flatten()
+                        ).float().to(eval_device)
                     state = (state - state_mean) / state_std
 
                     action = policy.get_action(state)
-                    obs, reward, terminated, truncated, _ = env.step(action)
+                    obs, reward, terminated, truncated, info = env.step(action)
                     done = terminated or truncated
                     episode_return += float(reward)
                     t += 1
                 results[style_id].append(episode_return)
+                # Success = reached goal AND the env registered the target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[style_id].append(
+                    1.0 if achieved == STYLE_NAMES[style_id] else 0.0
+                )
                 env.close()
 
         print(
             f"[BC oracle] Style {style_id} ({STYLE_NAMES[style_id]}): "
-            f"mean return = {np.mean(results[style_id]):.3f}"
+            f"success = {np.mean(success[style_id]):.2f}"
+            f" | mean return = {np.mean(results[style_id]):.3f}"
             f" ± {np.std(results[style_id]):.3f}"
         )
 
-    return results
+    return results, success
 
 
 # =============================================================================
 # Plotting
 # =============================================================================
 
-def plot_eval_results(results: Dict[int, list], save_path: str = "plots/eval_results_bc.png"):
-    """Bar chart of mean ± std return per style."""
+def plot_eval_results(results: Dict[int, list], success: Dict[int, list] = None,
+                      save_path: str = "plots/eval_results_bc.png"):
+    """Bar chart of per-style success rate (primary) and, if `success` is None,
+    falls back to mean ± std return for backward compatibility."""
     styles  = sorted(results.keys())
-    means   = [np.mean(results[s]) for s in styles]
-    stds    = [np.std(results[s])  for s in styles]
     labels  = [STYLE_NAMES[s].capitalize() for s in styles]
-    colors  = ["#4C72B0", "#DD8452", "#55A868"]
+    colors  = ["#4C72B0", "#DD8452", "#55A868", "#C44E52"]
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.bar(labels, means, yerr=stds, capsize=6, color=colors[:len(styles)],
-           alpha=0.85, error_kw={"linewidth": 1.5})
-    ax.set_ylabel("Mean Episode Return", fontsize=12)
-    ax.set_title("BC Oracle — Return by Style", fontsize=14)
+    if success is not None:
+        rates = [np.mean(success[s]) for s in styles]
+        ax.bar(labels, rates, color=colors[:len(styles)], alpha=0.85)
+        ax.set_ylabel("Success Rate (achieved == target)", fontsize=12)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_title("BC Oracle — Success Rate by Style", fontsize=14)
+    else:
+        means = [np.mean(results[s]) for s in styles]
+        stds  = [np.std(results[s])  for s in styles]
+        ax.bar(labels, means, yerr=stds, capsize=6, color=colors[:len(styles)],
+               alpha=0.85, error_kw={"linewidth": 1.5})
+        ax.set_ylabel("Mean Episode Return", fontsize=12)
+        ax.set_title("BC Oracle — Return by Style", fontsize=14)
     ax.yaxis.grid(True, alpha=0.4)
     ax.set_axisbelow(True)
     plt.tight_layout()
@@ -394,23 +438,23 @@ if __name__ == "__main__":
         device=device,
         log_every=10,
         save_dir="",
-        index_channel_only=True,
+        index_channel_only=True, #False, #True,
         state_normalization_factor=1,
         action_normalization_factor=1,
     )
 
     print("\n=== Evaluation ===")
-    results = evaluate_bc_oracle(
+    results, success = evaluate_bc_oracle(
         policies=policies,
-        num_episodes_per_style=20,
+        num_episodes_per_style=50,
         max_ep_len=100,
         eval_device=device,
     )
-    plot_eval_results(results)
+    plot_eval_results(results, success)
 
     # --- Load checkpoints and evaluate ---
     # policies = {}
-    # for style_id in range(3):
+    # for style_id in range(len(STYLE_NAMES)):
     #     ckpt = os.path.join("trained_models", f"bc_style{style_id}.pth")
     #     dataset = BCDataset(
     #         trajectory_paths=paths,

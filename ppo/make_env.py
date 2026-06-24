@@ -3,7 +3,8 @@ from minigrid.minigrid_env import MiniGridEnv
 from minigrid.wrappers import FullyObsWrapper, OneHotPartialObsWrapper, ViewSizeWrapper
 import numpy as np
 
-from envs.three_style_env import MiniGridThreeStyles
+from envs.multi_style_env import MiniGridMultiStyles
+# from envs.three_style_env import MiniGridThreeStyles
 from configs import EnvironmentConfig
 
 
@@ -21,12 +22,16 @@ def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode
             kwargs["render_mode"] = config.render_mode
         if config.max_steps:
             kwargs["max_steps"] = config.max_steps
+        if config.view_size:
+            kwargs["agent_view_size"] = config.view_size
 
         # env = gym.make(config.env_id, **kwargs)
         # env = DoubleGoalEnv(mode=mode, agent_start_pos=None, agent_pov=config.view_size, **kwargs)
         # env = MultiGoalEnv(num_goals=8, select_id_goal=mode, **kwargs) #0, 1, 2, 3
         # env = metal_grid_env()
-        env = MiniGridThreeStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, randomize_layout=True, easy_env=easy_env, **kwargs)
+        # env = MiniGridThreeStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, randomize_layout=True, easy_env=easy_env, **kwargs)
+        env = MiniGridMultiStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, free_item_placement=True, bypass_corridor=config.bypass_corridor, **kwargs)
+
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if config.capture_video and idx == 0:

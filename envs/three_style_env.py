@@ -11,11 +11,59 @@ from minigrid.core.world_object import WorldObj, Goal, Wall, Ball, Box, Lava
 from minigrid.core.grid import Grid
 from minigrid.core.constants import DIR_TO_VEC
 import numpy as np
-from envs.metalgridsolid.utils.utils import draw_triangle
-from envs.old.minigrid_dungeon.manual_control import ManualControl
+from other_envs.old.minigrid_dungeon.manual_control import ManualControl
 
 
 # --- rendering utils -----------------------------------------------------------
+
+def fill_polygon(img, points, color):
+    # Extract the bounding box of the polygon
+    min_x = min(point[0] for point in points)
+    max_x = max(point[0] for point in points)
+    min_y = min(point[1] for point in points)
+    max_y = max(point[1] for point in points)
+
+    # Iterate over the bounding box and fill pixels inside the triangle
+    for y in range(min_y, max_y + 1):
+        for x in range(min_x, max_x + 1):
+            if point_in_triangle((x, y), points):
+                img[y, x] = color
+
+
+def point_in_triangle(p, triangle):
+    """Check if point p is inside the triangle defined by the list of points."""
+
+    def sign(p1, p2, p3):
+        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+
+    b1 = sign(p, triangle[0], triangle[1]) < 0.0
+    b2 = sign(p, triangle[1], triangle[2]) < 0.0
+    b3 = sign(p, triangle[2], triangle[0]) < 0.0
+
+    return ((b1 == b2) and (b2 == b3))
+
+def draw_triangle(position, direction, color, img, cell_size, scale=0.6):
+    # Calculate the center of the cell
+    x, y = position[1] * cell_size, position[0] * cell_size
+    cx, cy = x + cell_size // 2, y + cell_size // 2
+
+    # Calculate the size of the triangle based on the scale
+    size = int((cell_size // 2) * scale)  # Scale down the size of the triangle
+
+    # Define the points of the triangle based on the direction
+    if direction == 0:  # UP
+        points = [(cx, cy - size), (cx - size, cy + size), (cx + size, cy + size)]
+    elif direction == 1:  # RIGHT
+        points = [(cx + size, cy), (cx - size, cy - size), (cx - size, cy + size)]
+    elif direction == 2:  # DOWN
+        points = [(cx, cy + size), (cx - size, cy - size), (cx + size, cy - size)]
+    elif direction == 3:  # LEFT
+        points = [(cx - size, cy), (cx + size, cy - size), (cx + size, cy + size)]
+
+    # Draw the triangle manually in the NumPy array
+    fill_polygon(img, points, np.array(color, dtype=np.uint8))
+
+
 def fill_coords(img, fn, color):
     """
     Fill pixels of an image with coordinates matching a filter function
@@ -392,7 +440,7 @@ class MiniGridThreeStyles(MiniGridEnv):
                 for i in range(4):
                     self.put_obj(Wall(), px + i, py)
                     self.put_obj(Wall(), px + i, py + 2)
-                # self.put_obj(Wall(), px, py + 1)
+                self.put_obj(Wall(), px, py + 1)
 
         # Place agent with randomization
         if self.randomize_layout:

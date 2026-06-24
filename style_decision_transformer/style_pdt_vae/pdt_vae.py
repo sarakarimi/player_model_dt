@@ -19,8 +19,8 @@ from torch.utils.data import DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
-from style_decision_transformer import paths
-from style_decision_transformer.lstm.style_vae import cluster_latents, plot_embeddings
+from style_decision_transformer.style_pdt_vae.paths import paths
+from style_decision_transformer.utils.utils import cluster_latents, plot_embeddings
 from trajectory_gpt2 import GPT2Model
 
 
@@ -578,6 +578,7 @@ def evaluate_online(
     device: str = "cpu",
     initial_rtg: float = 1.0,
     env_kwargs: dict = None,
+    max_context: int = None,
 ):
     """
     Evaluate the DT online for each style.
@@ -589,6 +590,10 @@ def evaluate_online(
     4. Return mean episode return for each style
     """
     model.eval()
+    # Match eval rollout context to the training window length, so the DT never
+    # has to extrapolate past the sequence lengths it was trained on.
+    if max_context is None:
+        max_context = model.dt.max_length
 
     if env_kwargs is None:
         env_kwargs = {}
@@ -598,6 +603,8 @@ def evaluate_online(
 
     # Results: {style_id: [returns]}
     results = {style_id: [] for style_id in range(num_styles)}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {style_id: [] for style_id in range(num_styles)}
 
     with torch.no_grad():
         for style_id in range(num_styles):
@@ -697,21 +704,32 @@ def evaluate_online(
 
                         timesteps = torch.cat([timesteps, torch.tensor([[t]], dtype=torch.long, device=device)], dim=1)
 
-                        # Truncate to max context window to avoid memory issues
-                        max_context = 20  # Keep last 20 timesteps
-                        if states.shape[1] > max_context:
+                        # keep only last max_context steps
+                        if max_context is not None and states.shape[1] > max_context:
                             states = states[:, -max_context:]
                             actions = actions[:, -max_context:]
                             rtgs = rtgs[:, -max_context:]
                             timesteps = timesteps[:, -max_context:]
 
                 results[style_id].append(episode_return)
+                # An episode succeeds only if the style the env actually
+                # registered matches the requested target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[style_id].append(
+                    1.0 if achieved == style_names[style_id] else 0.0
+                )
                 env.close()
 
-            print(f"Style {style_id}: mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f}")
+            print(
+                f"Style {style_id} ({style_names[style_id]}): "
+                f"success = {np.mean(success[style_id]):.2f} "
+                f"| mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f}"
+            )
 
     model.train()
-    return results
+    return results, success
 
 
 # =============================================================================
@@ -719,54 +737,48 @@ def evaluate_online(
 # =============================================================================
 
 def plot_eval_results(eval_history: dict, save_path: str = "eval_results.png"):
-    """Plot the online evaluation results for each style over training."""
+    """Plot the online evaluation results for each style over training.
+
+    Primary plot is the per-style success rate (achieved_style == target_style),
+    which is far less noisy than mean return. A companion `*_return.png` plot of
+    mean return is also saved when return history is available.
+    """
     epochs = eval_history["epochs"]
     style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
 
-    # Combined plot with all styles
+    # Success-rate plot (primary metric)
     plt.figure(figsize=(10, 6))
     for style_id in range(3):
-        returns = eval_history[f"style_{style_id}"]
-        plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+        rates = eval_history[f"style_{style_id}"]
+        plt.plot(epochs, rates, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
 
     plt.xlabel("Epoch", fontsize=12)
-    plt.ylabel("Mean Episode Return", fontsize=12)
-    plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
+    plt.ylim(-0.02, 1.02)
+    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
     plt.legend(fontsize=10)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-
     plt.savefig(save_path, dpi=150)
     print(f"Saved combined evaluation plot to {save_path}")
     plt.close()
 
-    # Individual plots for each style
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    for style_id in range(3):
-        ax = axes[style_id]
-        returns = eval_history[f"style_{style_id}"]
-
-        ax.plot(epochs, returns, marker='o', color=f'C{style_id}', linewidth=2, markersize=6)
-        ax.set_xlabel("Epoch", fontsize=11)
-        ax.set_ylabel("Mean Episode Return", fontsize=11)
-        ax.set_title(f"{style_names[style_id]} (Style {style_id})", fontsize=13, fontweight='bold')
-        ax.grid(True, alpha=0.3)
-
-        # Add min/max/final annotations
-        if returns:
-            final_return = returns[-1]
-            max_return = max(returns)
-            ax.axhline(y=max_return, color='green', linestyle='--', alpha=0.5, linewidth=1)
-            ax.text(0.02, 0.98, f"Final: {final_return:.2f}\nMax: {max_return:.2f}",
-                   transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
-    plt.tight_layout()
-    individual_path = save_path.replace('.png', '_individual.png')
-    plt.savefig(individual_path, dpi=150)
-    print(f"Saved individual style plots to {individual_path}")
-    plt.close()
+    # Companion return plot, if returns were tracked
+    if any(f"style_{s}_return" in eval_history for s in range(3)):
+        ret_path = save_path.replace(".png", "_return.png")
+        plt.figure(figsize=(10, 6))
+        for style_id in range(3):
+            returns = eval_history.get(f"style_{style_id}_return", [])
+            plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Mean Episode Return", fontsize=12)
+        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(ret_path, dpi=150)
+        print(f"Saved return evaluation plot to {ret_path}")
+        plt.close()
 
 
 # =============================================================================
@@ -784,7 +796,7 @@ def train_style_prompt_dt(
     log_every: int = 10,
     save_path: str = None,
     eval_every: int = 10,
-    eval_episodes_per_style: int = 10,
+    eval_episodes_per_style: int = 50,
     max_ep_len: int = 100,
     initial_rtg: float = 1.0,
 ):
@@ -793,13 +805,12 @@ def train_style_prompt_dt(
     model.train()
     optimizer = AdamW(model.parameters(), lr=lr)
 
-    # Track evaluation results
-    eval_history = {
-        "epochs": [],
-        "style_0": [],
-        "style_1": [],
-        "style_2": [],
-    }
+    # Track evaluation results. `style_{id}` holds the success rate (primary
+    # metric, the curve we plot); `style_{id}_return` keeps the mean return.
+    eval_history = {"epochs": []}
+    for style_id in range(3):
+        eval_history[f"style_{style_id}"] = []
+        eval_history[f"style_{style_id}_return"] = []
 
     for epoch in range(num_epochs):
         running_loss = 0.0
@@ -892,7 +903,7 @@ def train_style_prompt_dt(
         # Online evaluation every eval_every epochs
         if eval_every > 0 and (epoch + 1) % eval_every == 0:
             print(f"\n=== Online Evaluation at Epoch {epoch+1} ===")
-            eval_results = evaluate_online(
+            eval_results, eval_success = evaluate_online(
                 model=model,
                 dataset=dataloader.dataset,
                 num_styles=3,
@@ -900,13 +911,16 @@ def train_style_prompt_dt(
                 max_ep_len=max_ep_len,
                 device=device,
                 initial_rtg=initial_rtg,
+                max_context=None,  # match the training window length
             )
 
-            # Record results
+            # Record results: success rate (primary) and mean return.
             eval_history["epochs"].append(epoch + 1)
             for style_id in range(3):
+                success_rate = np.mean(eval_success[style_id]) if eval_success[style_id] else 0.0
                 mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
-                eval_history[f"style_{style_id}"].append(mean_return)
+                eval_history[f"style_{style_id}"].append(success_rate)
+                eval_history[f"style_{style_id}_return"].append(mean_return)
 
             print()
 
@@ -965,7 +979,7 @@ if __name__ == "__main__":
         log_every=10,
         save_path="style_prompt_dt_minigrid.pth",
         eval_every=10,
-        eval_episodes_per_style=10,
+        eval_episodes_per_style=50,
         max_ep_len=100,
         initial_rtg=1.0,
     )

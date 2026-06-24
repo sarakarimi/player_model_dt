@@ -24,10 +24,13 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
+from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
-from style_decision_transformer import paths
+from style_decision_transformer.style_pdt_vae.paths import paths
 from trajectory_gpt2 import GPT2Model
 
+# style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 
 # =============================================================================
 # Dataset
@@ -317,6 +320,7 @@ class PromptingDecisionTransformer(nn.Module):
             returns_to_go = returns_to_go.unsqueeze(-1)
 
         time_embeddings    = self.embed_timestep(timesteps)
+        states = states.reshape(batch_size, seq_length, -1)
         state_embeddings   = self.embed_state(states)   + time_embeddings
         action_embeddings  = self.embed_action(acts)    + time_embeddings
         returns_embeddings = self.embed_return(returns_to_go) + time_embeddings
@@ -347,6 +351,7 @@ class PromptingDecisionTransformer(nn.Module):
                 p_returns_to_go = p_returns_to_go.unsqueeze(-1)
 
             p_time_embeddings    = self.prompt_embed_timestep(p_timesteps)
+            p_states = p_states.reshape(batch_size, prompt_seq_length, -1)
             p_state_embeddings   = self.prompt_embed_state(p_states)   + p_time_embeddings
             p_action_embeddings  = self.prompt_embed_action(p_acts)    + p_time_embeddings
             p_returns_embeddings = self.prompt_embed_return(p_returns_to_go) + p_time_embeddings
@@ -449,7 +454,7 @@ def evaluate_online_prompting(
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
     eval_device:            str   = "cpu",
-    initial_rtg:            float = 1.0,
+    initial_rtg:            float = 3.0,
     env_kwargs:             dict  = None,
 ):
     """
@@ -458,20 +463,22 @@ def evaluate_online_prompting(
 
     Returns:
         results: {style_id: [episode_returns]}
+        success: {style_id: [1.0/0.0 success flags]}
     """
     eval_model.eval()
     if env_kwargs is None:
         env_kwargs = {}
-
-    style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+        env_kwargs["max_steps"] = 100
 
     state_mean = torch.tensor(eval_dataset.state_mean, device=eval_device, dtype=torch.float32)
     state_std  = torch.tensor(eval_dataset.state_std,  device=eval_device, dtype=torch.float32)
 
-    results = {s: [] for s in range(num_styles)}
+    results = {s: [] for s in range(len(style_names))}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {style_id: [] for style_id in range(num_styles)}
 
     with torch.no_grad():
-        for style_id in range(num_styles):
+        for style_id in range(len(style_names)):
             candidates = eval_dataset.style_to_indices.get(style_id, [])
             if not candidates:
                 print(f"  No trajectories for style {style_id}, skipping.")
@@ -492,21 +499,36 @@ def evaluate_online_prompting(
             prompt_tuple = (p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m)
 
             for ep in range(num_episodes_per_style):
-                env = MiniGridThreeStyles(
-                    target_style=style_names[style_id],
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    randomize_layout=True,
-                    **env_kwargs,
-                )
+                if len(style_names) == 3:
+                    env = MiniGridThreeStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        easy_env=False,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        **env_kwargs,
+                    )
+                else:
+                    env = MiniGridMultiStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        free_item_placement=True,
+                        **env_kwargs,
+                    )
                 obs, _ = env.reset(seed=42 + ep)
 
-                state = torch.from_numpy(
-                    obs["image"][:, :, 0].flatten()
-                ).float().to(eval_device)
-                state = (state - state_mean) / state_std
+                if len(style_names) == 3:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(eval_device)
+                else:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(eval_device)
+                state = (state - state_mean.flatten()) / state_std.flatten()
 
                 # history buffers (grow each step; get_action handles windowing)
                 s_hist  = state.unsqueeze(0)                                      # [1, state_dim]
@@ -530,16 +552,22 @@ def evaluate_online_prompting(
                     )
                     action = torch.argmax(action_logits, dim=-1).item()
 
-                    next_obs, reward, terminated, truncated, _ = env.step(action)
+                    next_obs, reward, terminated, truncated, info = env.step(action)
                     done = terminated or truncated
                     episode_return += float(reward)
                     t += 1
 
                     if not done:
-                        ns = torch.from_numpy(
-                            next_obs["image"][:, :, 0].flatten()
-                        ).float().to(eval_device)
-                        ns = (ns - state_mean) / state_std
+
+                        if len(style_names) == 3:
+                            ns = torch.from_numpy(
+                                next_obs["image"][:, :, 0].flatten()
+                            ).float().to(eval_device)
+                        else:
+                            ns = torch.from_numpy(
+                                next_obs["image"][:, :, 0].flatten()
+                            ).float().to(eval_device)
+                        ns = (ns - state_mean.flatten()) / state_std.flatten()
 
                         s_hist   = torch.cat([s_hist,   ns.unsqueeze(0)],                                        dim=0)
                         a_hist   = torch.cat([a_hist,   torch.tensor([action], dtype=torch.long, device=eval_device)])
@@ -548,16 +576,25 @@ def evaluate_online_prompting(
                         ti_hist  = torch.cat([ti_hist,  torch.tensor([t], dtype=torch.long, device=eval_device)])
 
                 results[style_id].append(episode_return)
+                # An episode succeeds only if it reached the goal AND the style
+                # the env actually registered matches the requested target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[style_id].append(
+                    1.0 if achieved == style_names[style_id] else 0.0
+                )
                 env.close()
 
             print(
                 f"[prompt] Style {style_id} ({style_names[style_id]}): "
-                f"mean return = {np.mean(results[style_id]):.3f}"
+                f"success = {np.mean(success[style_id]):.2f} "
+                f"| mean return = {np.mean(results[style_id]):.3f}"
                 f" ± {np.std(results[style_id]):.3f}"
             )
 
     eval_model.train()
-    return results
+    return results, success
 
 
 # =============================================================================
@@ -565,23 +602,48 @@ def evaluate_online_prompting(
 # =============================================================================
 
 def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_prompt.png"):
-    epochs      = eval_history["epochs"]
-    style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
+    """Plot the online evaluation results for each style over training.
 
+    Primary plot is the per-style success rate (achieved_style == target_style),
+    which is far less noisy than mean return. A companion `*_return.png` plot of
+    mean return is also saved when return history is available.
+    """
+    epochs = eval_history["epochs"]
+
+    # Success-rate plot (primary metric)
     plt.figure(figsize=(10, 6))
-    for style_id in range(3):
-        returns = eval_history[f"style_{style_id}"]
-        plt.plot(epochs, returns, marker="o",
+    for style_id in range(len(style_names)):
+        rates = eval_history[f"style_{style_id}"]
+        plt.plot(epochs, rates, marker="o",
                  label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
     plt.xlabel("Epoch", fontsize=12)
-    plt.ylabel("Mean Episode Return", fontsize=12)
-    plt.title("PromptDT — Online Evaluation Returns by Style", fontsize=14)
+    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
+    plt.ylim(-0.02, 1.02)
+    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
     plt.legend(fontsize=10)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
     print(f"Saved {save_path}")
     plt.close()
+
+    # Companion return plot, if returns were tracked
+    if any(f"style_{s}_return" in eval_history for s in range(len(style_names))):
+        ret_path = save_path.replace(".png", "_return.png")
+        plt.figure(figsize=(10, 6))
+        for style_id in range(len(style_names)):
+            returns = eval_history.get(f"style_{style_id}_return", [])
+            plt.plot(epochs, returns, marker="o",
+                     label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Mean Episode Return", fontsize=12)
+        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(ret_path, dpi=150)
+        print(f"Saved return evaluation plot to {ret_path}")
+        plt.close()
 
 
 # =============================================================================
@@ -598,15 +660,21 @@ def train_prompting_dt(
     log_every:           int   = 10,
     save_path:           str   = None,
     eval_every:          int   = 10,
-    eval_episodes_per_style: int = 10,
+    eval_episodes_per_style: int = 50,
     max_ep_len:          int   = 100,
-    initial_rtg:         float = 1.0,
+    initial_rtg:         float = 3.0,
 ):
     model.to(device)
     model.train()
     optimizer = AdamW(model.parameters(), lr=lr)
 
-    eval_history = {"epochs": [], "style_0": [], "style_1": [], "style_2": []}
+    # Track evaluation results. `style_{id}` holds the success rate (primary
+    # metric, the curve we plot); `style_{id}_return` keeps the mean return.
+    eval_history = {"epochs": []}
+    for style_id in range(len(style_names)):
+        eval_history[f"style_{style_id}"] = []
+        eval_history[f"style_{style_id}_return"] = []
+
 
     for epoch in range(num_epochs):
         running_loss = 0.0
@@ -673,19 +741,22 @@ def train_prompting_dt(
 
         if eval_every > 0 and (epoch + 1) % eval_every == 0:
             print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
-            eval_results = evaluate_online_prompting(
+            eval_results, eval_success = evaluate_online_prompting(
                 eval_model=model,
                 eval_dataset=dataloader.dataset,
-                num_styles=3,
+                num_styles=len(style_names),
                 num_episodes_per_style=eval_episodes_per_style,
                 max_ep_len=max_ep_len,
                 eval_device=device,
                 initial_rtg=initial_rtg,
             )
+            # Record results: success rate (primary) and mean return.
             eval_history["epochs"].append(epoch + 1)
-            for style_id in range(3):
-                mean_r = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
-                eval_history[f"style_{style_id}"].append(mean_r)
+            for style_id in range(len(style_names)):
+                success_rate = np.mean(eval_success[style_id]) if eval_success[style_id] else 0.0
+                mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
+                eval_history[f"style_{style_id}"].append(success_rate)
+                eval_history[f"style_{style_id}_return"].append(mean_return)
             print()
 
         if save_path is not None:

@@ -8,7 +8,8 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+MODE = "camouflage" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+CORRIDOR_DIR = "upper" #"lower" # lower Upper
 EASY_ENV = False
 
 def parse_args():
@@ -20,7 +21,7 @@ def parse_args():
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="three_style_env_" + MODE if EASY_ENV else "three_style_env_hard_" + MODE,
+        default="multi_style_env_" + MODE if EASY_ENV else "multi_style_env_hard_" + MODE,
         help="the name of this experiment",
     )
     parser.add_argument(
@@ -59,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--env_id",
         type=str,
-        default="MiniGrid-three_style",
+        default="MiniGrid-multi_style",
         help="the environment id",
     )
     parser.add_argument(
@@ -69,12 +70,12 @@ def parse_args():
         help="the size of the hidden layers",
     )
     parser.add_argument(
-        "--view_size", type=int, default=3, help="the size of the view"
+        "--view_size", type=int, default=7, help="the size of the view"
     )
     parser.add_argument(
         "--total_timesteps",
         type=int,
-        default=600000,
+        default=1500000,
         help="the total number of timesteps to train for",
     )
     parser.add_argument(
@@ -132,7 +133,7 @@ def parse_args():
         "--vf_coef", type=float, default=0.5, help="value loss coefficient"
     )
     parser.add_argument(
-        "--ent_coef", type=float, default=0.010, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01 for weapon 0.012
+        "--ent_coef", type=float, default=0.02, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01 for weapon 0.012
     )
     parser.add_argument(
         "--max_grad_norm",
@@ -143,13 +144,13 @@ def parse_args():
     parser.add_argument(
         "--max_steps",
         type=int,
-        default=100,
+        default=100, # 130 for weapon mode, 100 for bypass and camouflage and daredevil
         help="the maximum number of steps total",
     )
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard_randomize_layout/PPO_trajectories_three_style_env_" + MODE + ".gz",
+        default="/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/PPO_trajectories_multi_style_env_" + MODE + "_" + str(CORRIDOR_DIR) + ".gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(
@@ -158,6 +159,17 @@ def parse_args():
         default=MODE,
         help="the environment mode",
     )
+    parser.add_argument(
+        "--bypass_corridor",
+        type=str,
+        default=CORRIDOR_DIR,
+        choices=[None, "upper", "lower"],
+        help="for bypass style only: restrict the agent to the 'upper' or "
+             "'lower' corridor (entering the other half ends the episode). "
+             "Use to train two route-specific bypass PPOs.",
+    )
+    parser.add_argument("--style_step_penalty", type=float, default=0, help="the step penalty for each style") # -0.004 for camouflage top, 0 for bottom
+    parser.add_argument("--wrong_corridor_penalty", type=float, default=-0.5, help="the penalty for entering the wrong corridor in bypass mode")
     parser.add_argument(
         "--easy_env",
         action="store_true",
@@ -179,7 +191,7 @@ def parse_args():
     parser.add_argument(
         "--num_checkpoints",
         type=int,
-        default=10,
+        default=1,
         help="how many checkpoints are stored and uploaded to wandb during training",
     )
 
@@ -249,7 +261,7 @@ def get_obs_shape(single_observation_space) -> tuple:
 def store_model_checkpoint(
     agent, online_config, run_config, checkpoint_num, checkpoint_artifact
 ) -> int:
-    checkpoint_name = f"{run_config.exp_name}_{checkpoint_num:0>2}_PPO"
+    checkpoint_name = f"{run_config.exp_name}_{CORRIDOR_DIR}_{checkpoint_num:0>2}_PPO"
     checkpoint_path = f"/home/sara/repositories/player_model_dt/trained_models/{checkpoint_name}.pt"
 
     torch.save(

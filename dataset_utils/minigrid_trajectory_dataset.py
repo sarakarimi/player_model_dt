@@ -48,6 +48,68 @@ def controls_from_episode_summary(
     )
 
 
+# Marks an episode_summary as coming from MiniGridMultiStyles (the 4-style env),
+# which logs per-step behavioural counters the 3-style env does not.
+MULTI_STYLE_SUMMARY_KEYS = (
+    "lava_steps",
+    "enemy_adjacent_steps",
+    "enemy_near_unprotected_steps",
+    "detection_cone_steps",
+)
+
+
+def multi_style_controls_from_episode_summary(
+    episode_summary,
+    direct_dist: float = 14.0,
+) -> np.ndarray:
+    """
+    Build a float32 control vector from an episode_summary dict produced by
+    MiniGridMultiStyles (the 4-style env).  Returns zeros for missing fields.
+
+    Dimensions: [risk_taking, stealth_exposure, route_directness]
+
+    risk_taking      — how much danger the agent exposed itself to (the most
+                       dangerous thing it did): combat, lava, or half-weighted
+                       detection cones.  low=bypass, mid=camo, high=weapon/daredevil.
+    stealth_exposure — covertness: how much it handled danger by staying hidden /
+                       avoiding rather than confronting.  very-high=bypass,
+                       high=camo, mid=daredevil, low=weapon.
+    route_directness — path-length optimality (shortest_dist / steps taken).
+                       high=daredevil, low=bypass.
+
+    The normalising constants set the point at which a "full" engagement of each
+    kind saturates near 1; they are tunable from the real count distributions
+    after (re)collection — controls are recomputed on load, so retuning needs no
+    re-collection.
+    """
+    if not isinstance(episode_summary, dict):
+        episode_summary = {}
+
+    total_steps = int(episode_summary.get("total_steps",                  0))
+    lava        = int(episode_summary.get("lava_steps",                   0))
+    adj_enemy   = int(episode_summary.get("enemy_adjacent_steps",         0))
+    near_unprot = int(episode_summary.get("enemy_near_unprotected_steps", 0))
+    cone        = int(episode_summary.get("detection_cone_steps",         0))
+
+    ADJ_FULL, LAVA_FULL, CONE_FULL, EXPO_FULL = 3.0, 5.0, 4.0, 6.0
+
+    adj_c  = np.clip(adj_enemy / ADJ_FULL,  0.0, 1.0)
+    lava_c = np.clip(lava      / LAVA_FULL, 0.0, 1.0)
+    cone_c = np.clip(cone      / CONE_FULL, 0.0, 1.0)
+    expo_c = np.clip((near_unprot + lava) / EXPO_FULL, 0.0, 1.0)
+
+    risk_taking      = np.clip(max(adj_c, lava_c, 0.5 * cone_c), 0.0, 1.0)
+    stealth_exposure = np.clip(
+        1.0 - 0.85 * adj_c - 0.50 * expo_c - 0.20 * cone_c, 0.0, 1.0
+    )
+    route_directness = np.clip(direct_dist / max(total_steps, 1), 0.0, 1.0)
+
+    return np.array(
+        [risk_taking, stealth_exposure, route_directness],
+        dtype=np.float32,
+    )
+
+
 class TrajectoryDataset(Dataset):
     def __init__(
             self,
@@ -63,6 +125,9 @@ class TrajectoryDataset(Dataset):
             normalize_state=False,
             preprocess_observations: Callable = None,
             device="cpu",
+            select_highest_count_return_group=False,
+            highest_count_num_samples=500,
+            highest_count_top_k=10,
     ):
         self.trajectory_paths = trajectory_paths
         self.max_len = max_len
@@ -79,6 +144,14 @@ class TrajectoryDataset(Dataset):
         self.index_channel_only = index_channel_only
         self.sampling = sampling
 
+        # TEMPORARY TEST: when True, ignore the length-based selection below and
+        # keep only trajectories from the single most-common return group,
+        # sampling `highest_count_num_samples` of them. See
+        # get_highest_count_return_group.
+        self.select_highest_count_return_group = select_highest_count_return_group
+        self.highest_count_num_samples = highest_count_num_samples
+        self.highest_count_top_k = highest_count_top_k
+
         self.load_trajectories()
 
 
@@ -90,144 +163,42 @@ class TrajectoryDataset(Dataset):
         # used only for DEC-VAE experiments
         obs, acts, tasks = [], [], []
 
-        # Iterating over many dataset with different environment modes or play styles
-        for i, path in enumerate(self.trajectory_paths):
+        # Iterating over many datasets with different environment modes or play
+        # styles. Each entry in self.trajectory_paths may be either a single
+        # path (str) or a group of paths (list/tuple). For a group we draw an
+        # equal share from each sub-dataset and merge them under a single task
+        # id, so e.g. a style's `_top` and `_bottom` runs become one combined,
+        # half-and-half style. Single-path entries (e.g. daredevil) behave
+        # exactly as before, so there is no need to duplicate them.
+        for i, path_group in enumerate(self.trajectory_paths):
+            sub_paths = [path_group] if isinstance(path_group, str) else list(path_group)
+            n_sub = len(sub_paths)
 
-            traj_reader = TrajectoryReader(path)
-            data = traj_reader.read()
-            observations = data["data"].get("observations")
-            actions = data["data"].get("actions")
-            rewards = data["data"].get("rewards")
-            dones = data["data"].get("dones")
-            truncated = data["data"].get("truncated")
-            infos = data["data"].get("infos")
-            # mode = np.zeros((int(len(dones) / (i + 1)), 8, len(self.trajectory_paths)))
-            # mode[:, :, i] = 1
-            # modes = mode
+            # total target per style/group, split as evenly as possible across
+            # its sub-datasets (the first sub-path absorbs any remainder).
+            group_samples = 2000
+            per_sub = [group_samples // n_sub] * n_sub
+            per_sub[0] += group_samples - sum(per_sub)
 
-            observations = np.array(observations)
-            T_steps, B_envs = observations.shape[0], observations.shape[1]
-            actions = np.array(actions)
-            rewards = np.array(rewards)
-            dones = np.array(dones)
-            # modes = np.array(modes)
-
-            # check whether observations are flat or an image
-            if observations.shape[-1] == 3:
-                # use state space that includes  object IDX in each grid position
-                if self.index_channel_only:
-                    observations = observations[:, :, :, :, 0] # we use thi in the VAE model
-                else:
-                    observations = observations[:, :, :, :, :] # We use this in the DT model
-                self.observation_type = "index"
-            elif observations.shape[-1] == 20:
-                self.observation_type = "one_hot"
-            else:
-                raise ValueError(
-                    "Observations are not flat or images, check the shape of the observations: ",
-                    observations.shape,
-                )
-            if self.observation_type != "flat":
-                if self.index_channel_only:
-                    # use state space that includes  object IDX in each grid position
-                    t_observations = rearrange(
-                        torch.tensor(observations), "t b h w  -> (b t) (h w)"
-                    )
-                else:
-                    t_observations = rearrange(
-                        torch.tensor(observations), "t b h w c -> (b t) h w c"
-                        # "t b h w c -> (b t) (h w c)"  --> format used by traj embedding model
-                    )
-            else:
-                t_observations = rearrange(
-                    torch.tensor(observations), "t b f -> (b t) f"
+            for path, sub_samples in zip(sub_paths, per_sub):
+                (states, actions, rewards, dones, truncated, returns,
+                 timesteps, terminal_infos, data) = self._load_and_select(
+                    path, sub_samples
                 )
 
-            t_actions = rearrange(torch.tensor(actions), "t b -> (b t)")
-            t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
-            t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
-            t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
-            # t_modes = rearrange(torch.tensor(modes), "t b f -> (b t) f")
-            t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
-            done_indices = torch.where(t_done_or_truncated)[0]
+                # every sub-dataset in a group shares the same task id `i`
+                tasks = np.ones(len(actions), dtype=np.int64) * i
 
-            # Extract the terminal info dict for each trajectory.
-            # With gymnasium SyncVectorEnv, terminal infos live under info["final_info"][b].
-            raw_terminal_infos = []
-            if infos is not None:
-                for flat_idx in done_indices.numpy():
-                    t_step = int(flat_idx) % T_steps
-                    b_env = int(flat_idx) // T_steps
-                    ep_info = {}
-                    step_info = infos[t_step]
-                    if isinstance(step_info, dict) and "final_info" in step_info:
-                        fi = step_info["final_info"]
-                        if fi is not None and b_env < len(fi) and fi[b_env] is not None:
-                            ep_info = fi[b_env] if isinstance(fi[b_env], dict) else {}
-                    raw_terminal_infos.append(ep_info)
-                raw_terminal_infos.append({})  # sentinel for the trailing empty segment
-            else:
-                raw_terminal_infos = [{} for _ in range(len(done_indices) + 1)]
-
-            actions = torch.tensor_split(t_actions, done_indices + 1)
-            rewards = torch.tensor_split(t_rewards, done_indices + 1)
-            dones = torch.tensor_split(t_dones, done_indices + 1)
-            truncated = torch.tensor_split(t_truncated, done_indices + 1)
-            states = torch.tensor_split(t_observations, done_indices + 1)
-            # self.modes = torch.tensor_split(t_modes, done_indices + 1)
-            returns = [r.sum() for r in rewards]
-            returns = ['%.2f' % elem for elem in returns]
-            timesteps = [torch.arange(len(i)) for i in states]
-            # modes = torch.zeros(len(actions), len(self.trajectory_paths))
-            # modes[:, i] = 1
-
-            # Sampling trajectories based on their lengths and returns
-            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=15)
-            # print(top_seq_lengths)
-            seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
-
-            if self.sampling:  # Use random sampled trajectories
-                indexes = []
-                index_lists = []
-                # TODO remove hard-coded values
-                num_samples = 2000
-                for seq_len in seq_lens:
-                    index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
-                                  len(state) == seq_len]
-                    index_lists.extend(index_list)
-                index_list_sample = random.sample(index_lists, num_samples)
-                indexes.extend(index_list_sample)
-
-            else:  # Use non-random trajectories
-                num_samples = 2000
-                indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
-
-            print(len(indexes))
-            tasks = np.ones(len([actions[i] for i in indexes]), dtype=np.int64) * i
-            states = [states[i] for i in indexes]
-            actions = [actions[i] for i in indexes]
-            rewards = [rewards[i] for i in indexes]
-            dones = [dones[i] for i in indexes]
-            truncated = [truncated[i] for i in indexes]
-            returns = [returns[i] for i in indexes]
-            timesteps = [timesteps[i] for i in indexes]
-            terminal_infos = [raw_terminal_infos[i] for i in indexes]
-            # modes = [modes[i] for i in indexes]
-
-            top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=15)
-            print(top_seq_lengths)
-
-            # merge datasets
-            merge_actions.extend(actions)
-            merge_rewards.extend(rewards)
-            merge_dones.extend(dones)
-            merge_truncated.extend(truncated)
-            merge_observations.extend(states)
-            # merge_modes.extend(modes)
-            merge_returns.extend(returns)
-            merge_timesteps.extend(timesteps)
-            merge_tasks.extend(tasks)
-            merge_infos.extend(terminal_infos)
+                # merge datasets
+                merge_actions.extend(actions)
+                merge_rewards.extend(rewards)
+                merge_dones.extend(dones)
+                merge_truncated.extend(truncated)
+                merge_observations.extend(states)
+                merge_returns.extend(returns)
+                merge_timesteps.extend(timesteps)
+                merge_tasks.extend(tasks)
+                merge_infos.extend(terminal_infos)
 
         self.actions = merge_actions
         self.rewards = merge_rewards
@@ -254,14 +225,21 @@ class TrajectoryDataset(Dataset):
         self.tasks = [i for i, m in zip(self.tasks, traj_len_mask) if m]
         self.infos = [i for i, m in zip(self.infos, traj_len_mask) if m]
 
-        # Build per-trajectory control vectors from episode_summary
+        # Build per-trajectory control vectors from episode_summary.
+        # MiniGridMultiStyles (4-style env) logs extra behavioural counters and
+        # uses the new control set; the 3-style env keeps the original controls.
+        # We pick per-trajectory by checking which fields the summary carries, so
+        # both envs keep working without any change to the training scripts.
+        def _controls_for(ep_info):
+            summary = ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
+            if isinstance(summary, dict) and any(
+                k in summary for k in MULTI_STYLE_SUMMARY_KEYS
+            ):
+                return multi_style_controls_from_episode_summary(summary)
+            return controls_from_episode_summary(summary)
+
         self.controls = np.stack(
-            [
-                controls_from_episode_summary(
-                    ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
-                )
-                for ep_info in self.infos
-            ],
+            [_controls_for(ep_info) for ep_info in self.infos],
             axis=0,
         )  # [N, control_dim]
 
@@ -289,6 +267,140 @@ class TrajectoryDataset(Dataset):
 
         # top_seq_lengths = self.get_top_trajectory_lengths(self.states, self.returns, top_k=6)
         # print(top_seq_lengths)
+        # exit(0)
+
+
+
+    def _load_and_select(self, path, num_samples):
+        """Load a single trajectory file and return up to `num_samples`
+        trajectories selected by the same top-length / return criteria used
+        across the whole dataset.
+
+        Returns per-trajectory lists (states, actions, rewards, dones,
+        truncated, returns, timesteps, terminal_infos) plus the raw `data`
+        dict (kept for metadata). Task ids are assigned by the caller so that
+        several sub-datasets can share one id.
+        """
+        traj_reader = TrajectoryReader(path)
+        data = traj_reader.read()
+        observations = data["data"].get("observations")
+        actions = data["data"].get("actions")
+        rewards = data["data"].get("rewards")
+        dones = data["data"].get("dones")
+        truncated = data["data"].get("truncated")
+        infos = data["data"].get("infos")
+
+        observations = np.array(observations)
+        T_steps, B_envs = observations.shape[0], observations.shape[1]
+        actions = np.array(actions)
+        rewards = np.array(rewards)
+        dones = np.array(dones)
+
+        # check whether observations are flat or an image
+        if observations.shape[-1] == 3:
+            # use state space that includes object IDX in each grid position
+            if self.index_channel_only:
+                observations = observations[:, :, :, :, 0]  # we use this in the VAE model
+            else:
+                observations = observations[:, :, :, :, :]  # We use this in the DT model
+            self.observation_type = "index"
+        elif observations.shape[-1] == 20:
+            self.observation_type = "one_hot"
+        else:
+            raise ValueError(
+                "Observations are not flat or images, check the shape of the observations: ",
+                observations.shape,
+            )
+        if self.observation_type != "flat":
+            if self.index_channel_only:
+                t_observations = rearrange(
+                    torch.tensor(observations), "t b h w  -> (b t) (h w)"
+                )
+            else:
+                t_observations = rearrange(
+                    torch.tensor(observations), "t b h w c -> (b t) h w c"
+                )
+        else:
+            t_observations = rearrange(
+                torch.tensor(observations), "t b f -> (b t) f"
+            )
+
+        t_actions = rearrange(torch.tensor(actions), "t b -> (b t)")
+        t_rewards = rearrange(torch.tensor(rewards), "t b -> (b t)")
+        t_dones = rearrange(torch.tensor(dones), "t b -> (b t)")
+        t_truncated = rearrange(torch.tensor(truncated), "t b -> (b t)")
+        t_done_or_truncated = torch.logical_or(t_dones, t_truncated)
+        done_indices = torch.where(t_done_or_truncated)[0]
+
+        # Extract the terminal info dict for each trajectory.
+        # With gymnasium SyncVectorEnv, terminal infos live under info["final_info"][b].
+        raw_terminal_infos = []
+        if infos is not None:
+            for flat_idx in done_indices.numpy():
+                t_step = int(flat_idx) % T_steps
+                b_env = int(flat_idx) // T_steps
+                ep_info = {}
+                step_info = infos[t_step]
+                if isinstance(step_info, dict) and "final_info" in step_info:
+                    fi = step_info["final_info"]
+                    if fi is not None and b_env < len(fi) and fi[b_env] is not None:
+                        ep_info = fi[b_env] if isinstance(fi[b_env], dict) else {}
+                raw_terminal_infos.append(ep_info)
+            raw_terminal_infos.append({})  # sentinel for the trailing empty segment
+        else:
+            raw_terminal_infos = [{} for _ in range(len(done_indices) + 1)]
+
+        actions = torch.tensor_split(t_actions, done_indices + 1)
+        rewards = torch.tensor_split(t_rewards, done_indices + 1)
+        dones = torch.tensor_split(t_dones, done_indices + 1)
+        truncated = torch.tensor_split(t_truncated, done_indices + 1)
+        states = torch.tensor_split(t_observations, done_indices + 1)
+        returns = [r.sum() for r in rewards]
+        returns = ['%.2f' % elem for elem in returns]
+        timesteps = [torch.arange(len(s)) for s in states]
+
+        # Sampling trajectories based on their lengths and returns
+        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
+        print(top_seq_lengths)
+        seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=10)
+        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        # index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
+
+
+        if self.select_highest_count_return_group:  # TEMPORARY TEST
+            indexes = self.get_highest_count_return_group(
+                states, returns, num_samples=self.highest_count_num_samples,
+                top_k=self.highest_count_top_k)
+        elif self.sampling:  # Use random sampled trajectories
+            index_lists = []
+            for seq_len in seq_lens:
+                index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
+                              len(state) == seq_len]
+                index_lists.extend(index_list)
+            indexes = random.sample(index_lists, num_samples)
+        else:  # Use non-random trajectories
+            indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
+            # indexes = index_lists[-num_samples:]
+
+        print(len(indexes))
+        states = [states[idx] for idx in indexes]
+        actions = [actions[idx] for idx in indexes]
+        rewards = [rewards[idx] for idx in indexes]
+        dones = [dones[idx] for idx in indexes]
+        truncated = [truncated[idx] for idx in indexes]
+        returns = [returns[idx] for idx in indexes]
+        timesteps = [timesteps[idx] for idx in indexes]
+        terminal_infos = [raw_terminal_infos[idx] for idx in indexes]
+
+        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
+        print(top_seq_lengths)
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=10)
+        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+
+
+        return (states, actions, rewards, dones, truncated, returns,
+                timesteps, terminal_infos, data)
 
     @staticmethod
     def get_top_trajectory_lengths(states, returns, top_k=5):
@@ -305,6 +417,55 @@ class TrajectoryDataset(Dataset):
             if len(top_seq_lengths) == top_k:
                 break
         return top_seq_lengths
+
+    @staticmethod
+    def get_top_trajectory_returns(states, returns, top_k=5):
+        lengths = [len(s) for s in states]
+        returns = [float(r) for r in returns]
+        # group the sample indices by (length, ret) so we can recover them later
+        groups = {}
+        for idx, key in enumerate(zip(lengths, returns)):
+            groups.setdefault(key, []).append(idx)
+        sorted_items = sorted(groups.items(), key=lambda x: (x[0][1], len(x[1])), reverse=True)
+        top_seq_returns = []
+        seen_returns = set()
+        for (length, ret), indices in sorted_items:
+            if ret not in seen_returns:
+                top_seq_returns.append((length, ret, len(indices), indices))
+                seen_returns.add(ret)
+            if len(top_seq_returns) == top_k:
+                break
+        return top_seq_returns
+
+    @staticmethod
+    def get_highest_count_return_group(states, returns, num_samples=500, top_k=5):
+        """TEMPORARY TEST: among the `top_k` highest-return groups, keep the one
+        with the most trajectories.
+
+        Groups trajectories by their return value, restricts to the `top_k`
+        groups with the highest return, picks the most-common group among those,
+        and randomly samples up to `num_samples` indices from it.
+
+        Returns a list of selected trajectory indices.
+        """
+        returns = [float(r) for r in returns]
+        groups = {}
+        for idx, ret in enumerate(returns):
+            groups.setdefault(ret, []).append(idx)
+
+        # restrict to the top_k highest return values first ...
+        top_returns = sorted(groups.keys(), reverse=True)[:top_k]
+        # ... then pick the most-common group among those.
+        best_ret = max(top_returns, key=lambda r: len(groups[r]))
+        best_indices = groups[best_ret]
+        n = min(num_samples, len(best_indices))
+        print(
+            f"[highest-count-return-group] top_k={top_k} "
+            f"top_returns={sorted(top_returns, reverse=True)} -> chose return={best_ret} "
+            f"count={len(best_indices)} sampling={n} "
+            f"(out of {len(groups)} distinct return groups)"
+        )
+        return random.sample(best_indices, n)
 
     def get_indices_of_top_p_trajectories(self, pct_traj):
         num_timesteps = max(int(pct_traj * self.num_timesteps), 1)

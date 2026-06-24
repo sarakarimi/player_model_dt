@@ -1,16 +1,13 @@
-from numpy.random import rand
 from scipy.optimize import linear_sum_assignment
 import numpy as np
 from matplotlib.lines import Line2D
+from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.mixture import GaussianMixture
 import pandas
 from sklearn.manifold import TSNE
-from sklearn.mixture._gaussian_mixture import _compute_precision_cholesky
-import torch
-
 import torch
 import torch.nn.functional as F
 
@@ -87,10 +84,30 @@ def eval_gmm_accuracy(model, device, val_dataloader):
     return accuracy
 
 
-def plot_embeddings(gtruth, Z, model_predictions):
+
+def cluster_latents(Z, n_clusters):
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(Z)
+
+    predicted_labels, cluster_centroids = kmeans.labels_, kmeans.cluster_centers_
+    def order_kmeans_labels(labels, centroids):
+        # Order by centroid norm (or any other property)
+        order = np.argsort(np.linalg.norm(centroids, axis=1))
+        remap = np.zeros_like(order)
+        remap[order] = np.arange(len(order))
+
+        new_labels = remap[labels]
+
+        new_centroids = centroids[order]
+        return new_labels, new_centroids
+
+    predicted_labels, cluster_centroids = order_kmeans_labels(predicted_labels, cluster_centroids)
+    return predicted_labels, cluster_centroids
+
+
+def plot_embeddings(gtruth, Z, label_name='task_ground_truth'):
     embedding_data = []
-    for embedding, task, gtruth_task in zip(Z, model_predictions, gtruth):
-        embedding_data.append({'embeddings': embedding, 'tasks': task, 'task_ground_truth': gtruth_task})
+    for embedding, gtruth_task in zip(Z, gtruth):
+        embedding_data.append({'embeddings': embedding, label_name: gtruth_task})
     df = pandas.DataFrame(embedding_data)
     df = df.fillna(0)
     # print(df)
@@ -102,20 +119,10 @@ def plot_embeddings(gtruth, Z, model_predictions):
     df_fig['tsne-2d-two'] = tsne_results[:,1]
     sns.scatterplot(
         x="tsne-2d-one", y="tsne-2d-two",
-        hue="tasks",
+        hue=label_name,
         data=df_fig,
     )
     plt.show()
-    # plt.savefig('tsne1.png')
-    sns.scatterplot(
-        x="tsne-2d-one", y="tsne-2d-two",
-        hue="task_ground_truth",
-        data=df_fig,
-    )
-    # plt.savefig('tsne2.png')
-    plt.show()
-
-
 def plot_grad_flow(named_parameters):
     '''
     __author__: discuss.pytorch.org / RoshanRane
