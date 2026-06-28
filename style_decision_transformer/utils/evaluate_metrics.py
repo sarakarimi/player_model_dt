@@ -76,14 +76,57 @@ from style_decision_transformer.style_pdt_vae.sorl import (
     BCPolicy as SORLPolicy,
 )
 from envs.three_style_env import MiniGridThreeStyles
+from envs.multi_style_env import MiniGridMultiStyles
+from dataset_utils.minigrid_trajectory_dataset import (
+    controls_from_episode_summary,
+    multi_style_controls_from_episode_summary,
+    MULTI_STYLE_SUMMARY_KEYS,
+)
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-STYLE_NAMES  = {0: "bypass", 1: "weapon", 2: "camouflage"}
-STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}
+# Switch between the 3-style env (envs/three_style_env.py) and the 4-style
+# multi-style env (envs/multi_style_env.py, adds the "daredevil" lava style).
+# Must match the dataset referenced by paths.py: the multi-style datasets carry
+# task labels 0..3, so MULTI_STYLE must be True when evaluating on them.
+MULTI_STYLE = True
+
+if MULTI_STYLE:
+    STYLE_NAMES  = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+    STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#000000"}
+else:
+    STYLE_NAMES  = {0: "bypass", 1: "weapon", 2: "camouflage"}
+    STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}
+
+
+def make_eval_env(style_name: str, env_kwargs: dict):
+    """Construct the evaluation env for one target style.
+
+    Picks the multi-style env (with daredevil + lava) or the three-style env
+    based on MULTI_STYLE, mirroring the switch in
+    pdt_vae_with_prior.evaluate_online_controls.
+    """
+    if MULTI_STYLE:
+        return MiniGridMultiStyles(
+            target_style=style_name,
+            target_bonus=1.0,
+            non_target_penalty=-1.0,
+            agent_view_size=3,
+            free_item_placement=True,
+            **env_kwargs,
+        )
+    return MiniGridThreeStyles(
+        target_style=style_name,
+        target_bonus=1.0,
+        non_target_penalty=-1.0,
+        easy_env=False,
+        agent_view_size=3,
+        randomize_layout=True,
+        **env_kwargs,
+    )
 
 CONTROL_NAMES = [
     "risk_tolerance",
@@ -102,6 +145,49 @@ CONTROL_OUTCOME_MAP = [
 ]
 MAX_ENEMY_DIST = 12.0
 
+# The multi-style env uses a different control vector than the 3-style env.
+# Both are 3-dimensional, but the dimensions mean different things:
+#   3-style  (controls_from_episode_summary):
+#       [risk_tolerance, resource_pref, commitment]
+#   multi    (multi_style_controls_from_episode_summary):
+#       [risk_taking, stealth_exposure, confrontation]
+# CONTROL_NAMES / CONTROL_OUTCOME_MAP above stay the 3-style definitions because
+# eval_generalization.py imports them. CONTROL_NAMES_ACTIVE is what this module's
+# tables, plots, and fidelity computation use for the env selected by MULTI_STYLE.
+MULTI_CONTROL_NAMES = ["risk_taking", "stealth_exposure", "confrontation"]
+CONTROL_NAMES_ACTIVE = MULTI_CONTROL_NAMES if MULTI_STYLE else CONTROL_NAMES
+
+
+def achieved_control_from_summary(episode_summary):
+    """Recompute the *achieved* control vector from a rollout episode_summary.
+
+    Uses the same per-summary selection as the dataset (minigrid_trajectory_dataset
+    ._controls_for): if the summary carries the multi-style behavioural counters,
+    use the multi-style control formula, otherwise the 3-style one. This makes the
+    rollout's achieved controls directly comparable to the dataset controls fed in
+    as the conditioning, which is exactly what control fidelity measures.
+    """
+    if not isinstance(episode_summary, dict):
+        return None
+    if any(k in episode_summary for k in MULTI_STYLE_SUMMARY_KEYS):
+        return multi_style_controls_from_episode_summary(episode_summary)
+    return controls_from_episode_summary(episode_summary)
+
+
+def timestep_table_len(state_dict, default: int) -> int:
+    """max_ep_len implied by a checkpoint's timestep-embedding table.
+
+    The embed_timestep table is sized by max_ep_len, which at training time is
+    derived from the training data (StyleVAE) or fixed per script. Sizing the
+    rebuilt model from the checkpoint guarantees a match regardless of the
+    dataset loaded for evaluation, which may have a different max trajectory
+    length than the one the model was trained on.
+    """
+    for k in ("dt.embed_timestep.weight", "embed_timestep.weight"):
+        if k in state_dict:
+            return int(state_dict[k].shape[0])
+    return default
+
 
 # ---------------------------------------------------------------------------
 # Per-episode data container
@@ -111,7 +197,7 @@ MAX_ENEMY_DIST = 12.0
 class EpisodeRecord:
     style_id:           int
     target_style:       str
-    control_vector:     Optional[np.ndarray]    # None for BC (no explicit control)
+    control_vector:     Optional[np.ndarray]    # input conditioning (None for BC)
     episode_return:     float
     length:             int
     success:            bool
@@ -123,6 +209,10 @@ class EpisodeRecord:
     items_picked:       Optional[int]   = None
     picked_weapon:      Optional[bool]  = None
     picked_camouflage:  Optional[bool]  = None
+    traversed_lava:     Optional[bool]  = None   # daredevil style (multi-style env)
+    # control vector recomputed from the rollout outcome (env-appropriate formula),
+    # compared against control_vector to measure control fidelity.
+    achieved_control:   Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------
@@ -620,7 +710,7 @@ class SOAdapter(ModelAdapter):
 
 def _rollout_episode(
     adapter:     ModelAdapter,
-    env:         MiniGridThreeStyles,
+    env,
     state_mean:  torch.Tensor,
     state_std:   torch.Tensor,
     device:      str,
@@ -682,8 +772,13 @@ def _rollout_episode(
         min_enemy_distance=es.get("min_enemy_distance") if es else None,
         path_efficiency=es.get("path_efficiency") if es else None,
         items_picked=es.get("items_picked") if es else None,
-        picked_weapon=es.get("picked_weapon") if es else None,
-        picked_camouflage=es.get("picked_camouflage") if es else None,
+        # Three-style env reports picked_weapon/picked_camouflage; the multi-style
+        # env reports killed_with_weapon/traversed_detection_with_camo instead.
+        # Fall back so the usage rates are populated for either env.
+        picked_weapon=(es.get("picked_weapon", es.get("killed_with_weapon")) if es else None),
+        picked_camouflage=(es.get("picked_camouflage", es.get("traversed_detection_with_camo")) if es else None),
+        traversed_lava=es.get("traversed_lava") if es else None,
+        achieved_control=achieved_control_from_summary(es),
     )
 
 
@@ -725,15 +820,7 @@ def run_rollout_evaluation(
                 adapter.prepare(cond, style_id)
                 ctrl = adapter.control_vector()
 
-                env = MiniGridThreeStyles(
-                    target_style=style_name,
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    randomize_layout=True,
-                    **env_kwargs,
-                )
+                env = make_eval_env(style_name, env_kwargs)
 
                 for _ in range(num_episodes_per_style):
                     outcome = _rollout_episode(
@@ -781,8 +868,9 @@ def aggregate_rollout_metrics(records: List[EpisodeRecord]) -> dict:
             "detection_rate":         float(np.mean([r.detected for r in recs])),
             "avg_enemy_distance":     _mf(successes, "avg_enemy_distance"),
             "avg_path_efficiency":    _mf(successes, "path_efficiency"),
-            "weapon_usage_rate":      float(np.mean([r.picked_weapon     for r in successes])) if successes else float("nan"),
-            "camouflage_usage_rate":  float(np.mean([r.picked_camouflage for r in successes])) if successes else float("nan"),
+            "weapon_usage_rate":      _mf(successes, "picked_weapon"),
+            "camouflage_usage_rate":  _mf(successes, "picked_camouflage"),
+            "daredevil_usage_rate":   _mf(successes, "traversed_lava"),
         }
 
     per_style = {
@@ -797,37 +885,31 @@ def aggregate_rollout_metrics(records: List[EpisodeRecord]) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_control_fidelity(records: List[EpisodeRecord]) -> dict:
+    """Per-dimension fidelity between the input control and the control actually
+    achieved in the rollout.
+
+    The achieved control is recomputed from each rollout's episode_summary with
+    the same formula the dataset uses (achieved_control_from_summary), so input
+    and achieved live in the same space and dim i corresponds to dim i. Works for
+    both the 3-style and the multi-style control sets.
+    """
     suc = [r for r in records
            if r.success
            and r.control_vector is not None
-           and r.avg_enemy_distance is not None
-           and r.path_efficiency is not None
-           and r.items_picked is not None]
+           and r.achieved_control is not None]
 
     if len(suc) < 5:
         print("  Warning: too few successful episodes for control fidelity.")
-        return {"mean_abs_spearman_r": float("nan"), "per_dim": {}}
-
-    outcomes = {
-        "inv_min_dist":       np.array([1.0 - min(r.min_enemy_distance / MAX_ENEMY_DIST, 1.0) for r in suc]),
-        "resource_used":      np.clip(np.array([r.items_picked / 2.0 for r in suc]), 0, 1),
-        "stealth_score":      np.clip(
-                                  np.array([r.avg_enemy_distance / MAX_ENEMY_DIST for r in suc])
-                                  * np.array([1.0 - float(r.detected) for r in suc]),
-                              0, 1),
-        "avg_enemy_distance": np.clip(np.array([r.avg_enemy_distance / MAX_ENEMY_DIST for r in suc]), 0, 1),
-        "path_efficiency":    np.array([r.path_efficiency for r in suc]),
-    }
+        return {"mean_abs_spearman_r": float("nan"), "mean_mse": float("nan"), "per_dim": {}}
 
     results = {}
     rs = []
     mses = []
-    for dim_idx, outcome_key, _ in CONTROL_OUTCOME_MAP:
-        ctrl_vals = np.array([r.control_vector[dim_idx] for r in suc])
-        outcome_vals = outcomes[outcome_key]
+    for dim_idx, dim_name in enumerate(CONTROL_NAMES_ACTIVE):
+        ctrl_vals    = np.array([r.control_vector[dim_idx]   for r in suc])
+        outcome_vals = np.array([r.achieved_control[dim_idx] for r in suc])
         r_val, p_val = spearmanr(ctrl_vals, outcome_vals)
         mse_val = float(np.mean((ctrl_vals - outcome_vals) ** 2))
-        dim_name = CONTROL_NAMES[dim_idx]
         results[dim_name] = {
             "spearman_r": float(r_val),
             "p_value":    float(p_val),
@@ -997,7 +1079,7 @@ def print_metrics_table(metrics: dict, model_name: str = "Model"):
         "success_rate", "style_achievement_rate", "avg_return",
         "avg_episode_length", "detection_rate",
         "avg_enemy_distance", "avg_path_efficiency",
-        "weapon_usage_rate", "camouflage_usage_rate",
+        "weapon_usage_rate", "camouflage_usage_rate", "daredevil_usage_rate",
     ]:
         ov  = metrics["rollout"]["overall"].get(k, float("nan"))
         row = f"{k:<30} {ov:>10.3f}"
@@ -1009,7 +1091,7 @@ def print_metrics_table(metrics: dict, model_name: str = "Model"):
     if metrics.get("control_fidelity"):
         print("\n[ Control fidelity  (Spearman r, higher = controls drive behaviour) ]")
         cf = metrics["control_fidelity"]
-        for dim_name in CONTROL_NAMES:
+        for dim_name in CONTROL_NAMES_ACTIVE:
             info = cf.get(dim_name, {})
             r    = info.get("spearman_r", float("nan"))
             p    = info.get("p_value",    float("nan"))
@@ -1154,21 +1236,21 @@ def plot_comparison(all_metrics: dict, save_dir: str = None, std_metrics: dict =
 
     if cf_models:
         n_cf     = len(cf_models)
-        n_dims   = len(CONTROL_NAMES)
+        n_dims   = len(CONTROL_NAMES_ACTIVE)
         xc       = np.arange(n_dims)
         wc       = 0.8 / n_cf
-        dim_lbls = [d.replace("_", "\n") for d in CONTROL_NAMES]
+        dim_lbls = [d.replace("_", "\n") for d in CONTROL_NAMES_ACTIVE]
 
         fig2, ax2 = plt.subplots(figsize=(10, 5))
         fig2.suptitle("Model Comparison — Control Fidelity (Spearman r)", fontsize=13, fontweight="bold")
 
         for i, mn in enumerate(cf_models):
             cf     = all_metrics[mn]["control_fidelity"]
-            r_vals = [cf.get(d, {}).get("spearman_r", float("nan")) for d in CONTROL_NAMES]
+            r_vals = [cf.get(d, {}).get("spearman_r", float("nan")) for d in CONTROL_NAMES_ACTIVE]
             r_stds = None
             if std_metrics is not None and mn in std_metrics:
                 cf_s   = std_metrics[mn]["control_fidelity"]
-                r_stds = [cf_s.get(d, {}).get("spearman_r", 0.0) for d in CONTROL_NAMES]
+                r_stds = [cf_s.get(d, {}).get("spearman_r", 0.0) for d in CONTROL_NAMES_ACTIVE]
             offset = (i - n_cf / 2 + 0.5) * wc
             bars   = ax2.bar(xc + offset, r_vals, width=wc * 0.9,
                              color=palette[model_names.index(mn) % len(palette)],
@@ -1198,11 +1280,11 @@ def plot_comparison(all_metrics: dict, save_dir: str = None, std_metrics: dict =
 
         for i, mn in enumerate(cf_models):
             cf      = all_metrics[mn]["control_fidelity"]
-            mse_vals = [cf.get(d, {}).get("mse", float("nan")) for d in CONTROL_NAMES]
+            mse_vals = [cf.get(d, {}).get("mse", float("nan")) for d in CONTROL_NAMES_ACTIVE]
             mse_stds = None
             if std_metrics is not None and mn in std_metrics:
                 cf_s     = std_metrics[mn]["control_fidelity"]
-                mse_stds = [cf_s.get(d, {}).get("mse", 0.0) for d in CONTROL_NAMES]
+                mse_stds = [cf_s.get(d, {}).get("mse", 0.0) for d in CONTROL_NAMES_ACTIVE]
             offset = (i - n_cf / 2 + 0.5) * wc
             bars   = ax2b.bar(xc + offset, mse_vals, width=wc * 0.9,
                               color=palette[model_names.index(mn) % len(palette)],
@@ -1282,7 +1364,7 @@ def print_metrics_table_mean_std(mean_metrics: dict, std_metrics: dict, model_na
         "success_rate", "style_achievement_rate", "avg_return",
         "avg_episode_length", "detection_rate",
         "avg_enemy_distance", "avg_path_efficiency",
-        "weapon_usage_rate", "camouflage_usage_rate",
+        "weapon_usage_rate", "camouflage_usage_rate", "daredevil_usage_rate",
     ]:
         ov = mean_metrics["rollout"]["overall"].get(k, float("nan"))
         os = std_metrics["rollout"]["overall"].get(k, float("nan"))
@@ -1296,7 +1378,7 @@ def print_metrics_table_mean_std(mean_metrics: dict, std_metrics: dict, model_na
     if mean_metrics.get("control_fidelity"):
         print("\n[ Control fidelity (mean ± std Spearman r / MSE) ]")
         cf_m, cf_s = mean_metrics["control_fidelity"], std_metrics["control_fidelity"]
-        for dim_name in CONTROL_NAMES:
+        for dim_name in CONTROL_NAMES_ACTIVE:
             r_m   = cf_m.get(dim_name, {}).get("spearman_r", float("nan"))
             r_s   = cf_s.get(dim_name, {}).get("spearman_r", float("nan"))
             mse_m = cf_m.get(dim_name, {}).get("mse",        float("nan"))
@@ -1324,6 +1406,10 @@ def print_metrics_table_mean_std(mean_metrics: dict, std_metrics: dict, model_na
 if __name__ == "__main__":
     DEVICE = "cpu"
     HERE   = os.path.dirname(__file__)
+    # Checkpoints and plots live next to the training scripts in style_pdt_vae/,
+    # not in this utils/ directory (this module was moved here from there).
+    PDT_VAE_DIR = os.path.join(os.path.dirname(HERE), "style_pdt_vae")
+    MODELS_DIR  = os.path.join(PDT_VAE_DIR, "trained_models")
     control_dim = 3
 
     dataset_params = {
@@ -1345,18 +1431,28 @@ if __name__ == "__main__":
     context_len = 8
     prompt_len = 2
 
+    # The timestep embedding is sized by max_ep_len and must match the value used
+    # at training time or the checkpoint won't load. Rather than re-deriving it
+    # (StyleVAE training used dataset.max_ep_len + 1, which drifts if the eval data
+    # differs from the training data; PromptDT/ControlDT used a fixed 130), we read
+    # it back from each checkpoint so the rebuilt model always matches.
+    DEFAULT_MAX_EP_LEN = dataset.max_ep_len + 1
+    DT_MAX_EP_LEN      = 130
+    print(f"max trajectory length in eval data = {dataset.max_ep_len}")
 
     # 1. StyleVAE (main model)
+    vae_ckpt = os.path.join(MODELS_DIR, "style_prompt_dt_minigrid_controls_condprior.pth")
+    vae_sd = torch.load(vae_ckpt, map_location=DEVICE) if os.path.exists(vae_ckpt) else None
+    vae_max_ep_len = timestep_table_len(vae_sd, DEFAULT_MAX_EP_LEN) if vae_sd else DEFAULT_MAX_EP_LEN
     vae_model = StyleVAEPromptDT(
         state_dim=9, act_dim=7, hidden_size=128, latent_dim=16,
-        max_length=20, max_ep_len=100, action_tanh=False,
+        max_length=context_len, max_ep_len=vae_max_ep_len, action_tanh=False,
         beta=0.0085, control_dim=control_dim, prior_hidden=128,
         free_bits=0.0, n_layer=4, n_head=8,
     )
-    vae_ckpt = os.path.join(HERE, "trained_models/style_prompt_dt_minigrid_controls_condprior.pth")
-    if os.path.exists(vae_ckpt):
-        vae_model.load_state_dict(torch.load(vae_ckpt, map_location=DEVICE))
-        print(f"Loaded StyleVAE: {vae_ckpt}")
+    if vae_sd is not None:
+        vae_model.load_state_dict(vae_sd)
+        print(f"Loaded StyleVAE (max_ep_len={vae_max_ep_len}): {vae_ckpt}")
     else:
         print(f"StyleVAE checkpoint not found at {vae_ckpt} — using random weights.")
     vae_model.to(DEVICE)
@@ -1364,9 +1460,9 @@ if __name__ == "__main__":
 
     # 2. BC oracle (one policy per style)
     bc_policies: Dict[int, BCPolicy] = {}
-    for sid in range(3):
+    for sid in range(len(STYLE_NAMES)):
         policy = BCPolicy(state_dim=9, act_dim=7, hidden_size=256, num_layers=3)
-        ckpt = os.path.join(HERE, f"trained_models/bc_style{sid}.pth")
+        ckpt = os.path.join(MODELS_DIR, f"bc_style{sid}.pth")
         if os.path.exists(ckpt):
             policy.load_state_dict(torch.load(ckpt, map_location=DEVICE))
             print(f"Loaded BC style {sid}: {ckpt}")
@@ -1385,15 +1481,17 @@ if __name__ == "__main__":
     )
 
     # 3. PromptDT
+    pdt_ckpt = os.path.join(MODELS_DIR, "prompt_dt_minigrid.pth")
+    pdt_sd = torch.load(pdt_ckpt, map_location=DEVICE) if os.path.exists(pdt_ckpt) else None
+    pdt_max_ep_len = timestep_table_len(pdt_sd, DT_MAX_EP_LEN) if pdt_sd else DT_MAX_EP_LEN
     prompt_model = PromptingDecisionTransformer(
         state_dim=9, act_dim=7, hidden_size=128,
-        max_length=context_len, max_ep_len=100, action_tanh=False,
+        max_length=context_len, max_ep_len=pdt_max_ep_len, action_tanh=False,
         n_layer=4, n_head=8,
     )
-    pdt_ckpt = os.path.join(HERE, "trained_models/prompt_dt_minigrid.pth")
-    if os.path.exists(pdt_ckpt):
-        prompt_model.load_state_dict(torch.load(pdt_ckpt, map_location=DEVICE))
-        print(f"Loaded PromptDT: {pdt_ckpt}")
+    if pdt_sd is not None:
+        prompt_model.load_state_dict(pdt_sd)
+        print(f"Loaded PromptDT (max_ep_len={pdt_max_ep_len}): {pdt_ckpt}")
     else:
         print(f"PromptDT checkpoint not found: {pdt_ckpt} — using random weights.")
     prompt_model.to(DEVICE)
@@ -1407,9 +1505,9 @@ if __name__ == "__main__":
         index_channel_only=True,
     )
     sorl_policies: Dict[int, SORLPolicy] = {}
-    for k in range(3):
+    for k in range(len(STYLE_NAMES)):
         p = SORLPolicy(state_dim=9, act_dim=7, hidden_size=256, num_layers=3)
-        ckpt = os.path.join(HERE, f"trained_models/sorl_bc_style{k}.pth")
+        ckpt = os.path.join(MODELS_DIR, f"sorl_bc_style{k}.pth")
         if os.path.exists(ckpt):
             p.load_state_dict(torch.load(ckpt, map_location=DEVICE))
             print(f"Loaded SORL style {k}: {ckpt}")
@@ -1421,15 +1519,17 @@ if __name__ == "__main__":
     adapters["SORL"] = SOAdapter(sorl_policies, so_dataset, device=DEVICE)
 
     # 5. ControlDT
+    ctrl_ckpt = os.path.join(MODELS_DIR, "control_dt_minigrid.pth")
+    ctrl_sd = torch.load(ctrl_ckpt, map_location=DEVICE) if os.path.exists(ctrl_ckpt) else None
+    ctrl_max_ep_len = timestep_table_len(ctrl_sd, DT_MAX_EP_LEN) if ctrl_sd else DT_MAX_EP_LEN
     ctrl_model = ControlConditionedDT(
         state_dim=9, act_dim=7, hidden_size=128,
-        control_dim=control_dim, max_length=context_len, max_ep_len=100,
+        control_dim=control_dim, max_length=context_len, max_ep_len=ctrl_max_ep_len,
         action_tanh=False, n_layer=4, n_head=8,
     )
-    ctrl_ckpt = os.path.join(HERE, "trained_models/control_dt_minigrid.pth")
-    if os.path.exists(ctrl_ckpt):
-        ctrl_model.load_state_dict(torch.load(ctrl_ckpt, map_location=DEVICE))
-        print(f"Loaded ControlDT: {ctrl_ckpt}")
+    if ctrl_sd is not None:
+        ctrl_model.load_state_dict(ctrl_sd)
+        print(f"Loaded ControlDT (max_ep_len={ctrl_max_ep_len}): {ctrl_ckpt}")
     else:
         print(f"ControlDT checkpoint not found: {ctrl_ckpt} — using random weights.")
     ctrl_model.to(DEVICE)
@@ -1472,4 +1572,4 @@ if __name__ == "__main__":
 
     # Comparison table (mean only) + plots
     print_comparison_table(mean_metrics)
-    plot_comparison(mean_metrics, save_dir=HERE, std_metrics=std_metrics)
+    plot_comparison(mean_metrics, save_dir=PDT_VAE_DIR, std_metrics=std_metrics)

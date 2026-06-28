@@ -20,6 +20,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from envs.multi_style_env import MiniGridMultiStyles
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 sys.path.insert(0, REPO_ROOT)
 
@@ -40,10 +42,17 @@ DEVICE = "cpu"
 # ---------------------------------------------------------------------------
 # Canonical control vectors (per-style training-data means)
 # ---------------------------------------------------------------------------
+# CANONICAL = {
+#     "bypass":     np.array([0.670, 0.030, 0.810], dtype=np.float32),
+#     "weapon":     np.array([0.920, 0.550, 0.580], dtype=np.float32),
+#     "camouflage": np.array([0.670, 0.530, 0.770], dtype=np.float32),
+# }
 CANONICAL = {
-    "bypass":     np.array([0.670, 0.030, 0.810], dtype=np.float32),
-    "weapon":     np.array([0.920, 0.550, 0.580], dtype=np.float32),
-    "camouflage": np.array([0.670, 0.530, 0.770], dtype=np.float32),
+    "bypass":     np.array([0.0, 1.0, 0.0], dtype=np.float32),
+    "weapon":     np.array([0.79, 0.16, 0.79], dtype=np.float32),
+    "camouflage": np.array([0.39, 0.68, 0.34], dtype=np.float32),
+    "daredevil": np.array([1.0, 0.12, 0.18], dtype=np.float32),
+
 }
 
 N_Z         = 10     # distinct z samples per control vector
@@ -63,11 +72,23 @@ def _rollout_positions(get_action_fn, state_mean, state_std, env_seed):
       positions : list of (x, y) agent grid positions at each step
       map_img   : RGB render of the environment (captured after reset)
     """
-    env = MiniGridThreeStyles(
-        target_style=None, target_bonus=1.0, non_target_penalty=-1.0,
-        easy_env=False, agent_view_size=3, randomize_layout=True,
-        render_mode="rgb_array",
-    )
+    if len(CANONICAL) == 3:
+        env = MiniGridThreeStyles(
+            target_style=None, target_bonus=1.0, non_target_penalty=-1.0,
+            easy_env=False, agent_view_size=3, randomize_layout=True,
+            render_mode="rgb_array",
+        )
+    else:
+
+        env = MiniGridMultiStyles(
+            target_style=None,
+            target_bonus=1.0,
+            non_target_penalty=-1.0,
+            agent_view_size=3,
+            free_item_placement=True,
+            max_steps=130,
+            render_mode="rgb_array")
+
     obs, _ = env.reset(seed=env_seed)
     map_img = env.render()   # capture layout before agent moves
 

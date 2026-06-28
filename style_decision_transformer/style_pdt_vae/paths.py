@@ -11,12 +11,12 @@ paths = [
     # "/home/sara/repositories/player_model_dt/datasets/minigrid/three_style_env_hard/PPO_trajectories_three_style_env_camouflage.gz",
 
     # Multi style env
-    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/old/PPO_trajectories_multi_style_env_bypass_top.gz"],
-    # "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/PPO_trajectories_multi_style_env_bypass_bottom.gz"],
-    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/old/PPO_trajectories_multi_style_env_weapon_top.gz"],
-    # "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/PPO_trajectories_multi_style_env_weapon_bottom.gz"],
-    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/old/PPO_trajectories_multi_style_env_camouflage_top.gz"],
-    # "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/PPO_trajectories_multi_style_env_camouflage_bottom.gz"],
-    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/old/PPO_trajectories_multi_style_env_daredevil.gz"],
+    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_bypass_upper.gz",
+    "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_bypass_lower.gz"],
+    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_weapon_upper.gz",
+    "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_weapon_lower.gz"],
+    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_camouflage_upper.gz",
+    "/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_camouflage_lower.gz"],
+    ["/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/from_checkpoints/PPO_trajectories_multi_style_env_daredevil_None.gz"],
     # daredevil top and bottom are the same file just for consistency i duplicated it
 ]

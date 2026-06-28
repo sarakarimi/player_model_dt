@@ -208,15 +208,15 @@ class MiniGridMultiStyles(MiniGridEnv):
      y= 2:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y= 3:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y= 4:    #  .  #  #  #  #  #  #  #  #  #  #  #  #  #  .  #
-     y= 5:    #  .  #  W  .  C  .  .  B  .  .  d  d  d  .  .  #
-     y= 6:    #  .  #  .  .  .  .  .  .  .  .  E  d  d  #  .  #
-     y= 7:    #  .  #  .  .  .  .  .  .  .  .  d  d  d  #  .  #
+     y= 5:    #  .  #  B  B  .  .  W  W  .  .  d  d  d  .  .  #
+     y= 6:    #  .  #  B  B  C  C  W  W  .  .  E  d  d  #  .  #
+     y= 7:    #  .  #  .  .  C  C  .  .  .  .  d  d  d  #  .  #
      y= 8:    #  A  .  .  .  .  .  L  L  L  L  L  L  L  .  G  #
-     y= 9:    #  .  #  .  .  .  .  .  .  .  .  d  d  d  #  .  #
-     y=10:    #  .  #  .  W  .  .  .  .  .  .  E  d  d  #  .  #
-     y=11:    #  .  #  .  .  C  .  .  B  .  .  d  d  d  .  .  #
-     y=12:    #  .  #  .  .  .  .  .  .  .  .  d  d  d  #  .  #
-     y=13:    #  .  #  #  #  #  #  #  #  #  #  #  #  #  #  .  #
+     y= 9:    #  .  #  .  .  C  C  .  .  .  .  d  d  d  #  .  #
+     y=10:    #  .  #  B  B  C  C  W  W  .  .  E  d  d  #  .  #
+     y=11:    #  .  #  B  B  .  .  W  W  .  .  d  d  d  .  .  #
+     y=12:    #  .  #  #  #  #  #  #  #  #  #  #  #  #  #  .  #
+     y=13:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y=14:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y=15:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y=16:    #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #
@@ -240,7 +240,7 @@ class MiniGridMultiStyles(MiniGridEnv):
         style_bonuses: Optional[dict] = None,
         randomize_layout: bool = False,
         free_item_placement: bool = False,
-        lava_penalty: float = -0.5,
+        lava_penalty: float = -0.3,
         detection_penalty: float = -0.5,
         end_on_detection: bool = True,
         end_on_lava: bool = True,
@@ -344,10 +344,26 @@ class MiniGridMultiStyles(MiniGridEnv):
         # post-kill exit shaping state
         self._prev_exit_dist: Optional[float] = None
         self._exit_phase: Optional[str] = None
+        self._exit_wp_idx: int = 0
 
         # bypass perimeter-shaping state
         self._bypass_wp_idx: int = 0
         self._prev_bypass_dist: Optional[float] = None
+
+        # daredevil boots->lava->goal shaping state
+        self._boots_positions: list = []
+        self._prev_dd_dist: Optional[float] = None
+        self._dd_phase: Optional[str] = None
+
+        # weapon pre-kill pickup->enemy shaping state
+        self._weapon_positions: list = []
+        self._prev_wpn_dist: Optional[float] = None
+        self._wpn_phase: Optional[str] = None
+
+        # camouflage pre-traversal pickup->cone shaping state
+        self._camo_positions: list = []
+        self._prev_camo_dist: Optional[float] = None
+        self._camo_phase: Optional[str] = None
 
         mission_space = MissionSpace(mission_func=self._gen_mission)
         super().__init__(
@@ -399,10 +415,24 @@ class MiniGridMultiStyles(MiniGridEnv):
         # post-kill exit shaping state
         self._prev_exit_dist = None
         self._exit_phase = None
+        self._exit_wp_idx = 0
 
         # bypass perimeter-shaping state
         self._bypass_wp_idx = 0
         self._prev_bypass_dist = None
+
+        # daredevil boots->lava->goal shaping state
+        self._boots_positions = []
+        self._prev_dd_dist = None
+        self._dd_phase = None
+
+        self._weapon_positions = []
+        self._prev_wpn_dist = None
+        self._wpn_phase = None
+
+        self._camo_positions = []
+        self._prev_camo_dist = None
+        self._camo_phase = None
 
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
@@ -413,14 +443,14 @@ class MiniGridMultiStyles(MiniGridEnv):
             self.put_obj(Wall(), x, 4)
         # south wall: row 13, cols 2..14
         for x in range(2, 15):
-            self.put_obj(Wall(), x, 13)
+            self.put_obj(Wall(), x, 12)
         # west wall: col 2, rows 4..13 (opening at row 8 for agent entry)
-        for y in range(4, 14):
+        for y in range(4, 13):
             if y != 8:
                 self.put_obj(Wall(), 2, y)
         # east wall: col 14, rows 4..13. Openings at rows 5 (camo N exit),
         # 8 (lava exit / daredevil), 11 (camo S exit).
-        for y in range(4, 14):
+        for y in range(4, 13):
             if y not in (5, 8, 11):
                 self.put_obj(Wall(), 14, y)
 
@@ -442,7 +472,7 @@ class MiniGridMultiStyles(MiniGridEnv):
         # E2 (south chamber): faces east (dir=0). Front-only 3x4 cone, cols
         # 11..13 rows 9..12 (enemy column + 2 forward).
         self.enemy2_pos = (11, 10)
-        self.enemy2_box = (11, 13, 9, 12)
+        self.enemy2_box = (11, 13, 9, 11)
         self.enemy2_obj = Enemy(dir=0)
         self.put_obj(self.enemy2_obj, *self.enemy2_pos)
         self.enemy2_alive = True
@@ -454,50 +484,41 @@ class MiniGridMultiStyles(MiniGridEnv):
             return random.choice(choices) if self.randomize_layout else default
 
         if self.free_item_placement:
-            # Single weapon / camo / boots, placed at random non-overlapping
-            # positions inside two chamber-interior squares (cols narrowed to
-            # {4, 5} to make item discovery easier while keeping the top/bottom
-            # split that drives bimodal, item-location-dependent behaviour):
-            #   square A: x in {4, 5}, y in [5, 8]
-            #   square B: x in {4, 5}, y in [9, 12]
-            # skipping lava tiles (row 8, cols 7..13) and the two tiles
-            # immediately in front of the W entrance at (2, 8) — i.e. (3, 8)
-            # and (4, 8) — so the agent never spawns facing an item.
-            regions = [
-                (range(4, 6), range(5, 8)),    # square A
-                (range(4, 6), range(9, 12)),   # square B
-            ]
-            valid_cells = [
-                (x, y)
-                for xs, ys in regions
-                for x in xs
-                for y in ys
-                if not (y == 8 and 7 <= x <= 9)        # not on lava
-                and (x, y) not in {(3, 8), (4, 8)}     # not in front of entrance
-            ]
+            # Dedicated per-item zones: a 2x2 square top and bottom (mirror-
+            # symmetric across the lava row). Each item spawns in a random cell
+            # of its own zone, so styles stay spatially separable while keeping
+            # top/bottom route diversity. Columns are disjoint (boots x3-4,
+            # camo x5-6, weapon x7-8), so items never collide.
+            boots_cells  = [(3, 5), (4, 5), (3, 6), (4, 6),
+                            (3, 10), (4, 10), (3, 11), (4, 11)]
+            camo_top     = [(5, 6), (6, 6), (5, 7), (6, 7)]
+            camo_bot     = [(5, 9), (6, 9), (5, 10), (6, 10)]
+            weapon_top   = [(7, 5), (8, 5), (7, 6), (8, 6)]
+            weapon_bot   = [(7, 10), (8, 10), (7, 11), (8, 11)]
 
-            top_cells    = [c for c in valid_cells if c[1] < 8]   # square A
-            bottom_cells = [c for c in valid_cells if c[1] > 8]   # square B
-            assert len(top_cells) >= 2 and len(bottom_cells) >= 2, (
-                "free_item_placement: need >=2 cells per zone "
-                f"(top={len(top_cells)}, bottom={len(bottom_cells)})."
-            )
+            # Only when training that style: restrict its TARGET item to the
+            # committed corridor side so it never sits across the lava from the
+            # target enemy/cone (which would force a deadly crossing). Otherwise
+            # (item is just a distractor, or no side) it can be either top/bottom.
+            def _side_cells(style, top, bot):
+                if self.target_style == style and self.bypass_corridor == "upper":
+                    return top
+                if self.target_style == style and self.bypass_corridor == "lower":
+                    return bot
+                return top + bot
 
-            # Cap at most 2 of the 3 items per zone: one zone gets 2, the other
-            # gets 1, so both zones are always occupied and neither is crowded
-            # with all three. Items are assigned to the chosen positions
-            # uniformly at random, so each item stays ~50/50 top vs bottom.
-            n_top = 2 if random.random() < 0.5 else 1
-            n_bottom = 3 - n_top
-            positions = (
-                random.sample(top_cells, n_top)
-                + random.sample(bottom_cells, n_bottom)
-            )
-            random.shuffle(positions)
-            w_pos, c_pos, b_pos = positions
+            weapon_cells = _side_cells("weapon", weapon_top, weapon_bot)
+            camo_cells = _side_cells("camouflage", camo_top, camo_bot)
+
+            w_pos = random.choice(weapon_cells)
+            c_pos = random.choice(camo_cells)
+            b_pos = random.choice(boots_cells)
             self.put_obj(Weapon(), *w_pos)
             self.put_obj(Camouflage(), *c_pos)
             self.put_obj(Boots(), *b_pos)
+            self._boots_positions = [b_pos]
+            self._weapon_positions = [w_pos]
+            self._camo_positions = [c_pos]
         else:
             w1 = pick([(7, 5), (8, 5)], (7, 5))
             w2 = pick([(3, 11), (4, 11)], (3, 11))
@@ -512,6 +533,9 @@ class MiniGridMultiStyles(MiniGridEnv):
             self.put_obj(Camouflage(), *c2)
             self.put_obj(Boots(), *b1)
             self.put_obj(Boots(), *b2)
+            self._boots_positions = [b1, b2]
+            self._weapon_positions = [w1, w2]
+            self._camo_positions = [c1, c2]
 
         # --- goal ------------------------------------------------------------
         self.goal_pos = (15, 8)
@@ -659,7 +683,7 @@ class MiniGridMultiStyles(MiniGridEnv):
 
         obs, reward, terminated, truncated, info = super().step(action)
 
-        self.step_count += 1
+        # self.step_count += 1
         if action == 2:
             self.forward_action_count += 1
         if action == 3:
@@ -841,15 +865,13 @@ class MiniGridMultiStyles(MiniGridEnv):
             if killed_this_step and self.shape_rewards and self.target_style == "weapon":
                 reward += self.kill_bonus
 
-        # --- post-kill exit shaping ---------------------------------------------
-        # Once the target enemy is dead, the detection box that guarded the exit
-        # gate is gone — but the policy still carries the avoidance it learned
-        # while the enemy was alive and refuses to walk through the (now-safe)
-        # gate cells. Give a dense potential-based pull toward the gate, then to
-        # the goal once through it (a single distance-to-goal potential has a
-        # trap, since reaching the gate means briefly moving away from the goal).
-        # Potential-based, so it telescopes to zero and leaves the optimum
-        # unchanged. Only active for a side-specific weapon run.
+        # --- post-kill exit shaping (ordered waypoints) -------------------------
+        # After the kill the policy still avoids the now-safe cone/gate region and
+        # the col-15 perimeter it never trained on, so it stalls at the gate. Pull
+        # it along explicit waypoints: gate -> perimeter corner (col 15) -> goal,
+        # advancing as each is reached and re-baselining. Stronger coef than the
+        # pre-kill legs. Telescopes per leg, so the optimum is unchanged. Only
+        # active for a side-specific weapon run.
         if (
             self.shape_rewards
             and self.exit_approach_coef
@@ -858,15 +880,18 @@ class MiniGridMultiStyles(MiniGridEnv):
         ):
             gate = self._weapon_exit_gate()
             if gate is not None:
-                in_corridor = self.agent_pos[0] >= gate[0]
-                waypoint = self.goal_pos if in_corridor else gate
-                phase = "goal" if in_corridor else "gate"
-                cur = self._manhattan(self.agent_pos, waypoint)
-                # only reward within a phase; on a phase switch just re-baseline
-                if self._exit_phase == phase and self._prev_exit_dist is not None:
-                    reward += self.exit_approach_coef * (self._prev_exit_dist - cur)
+                wps = [gate, (15, gate[1]), self.goal_pos]
+                while (
+                    self._exit_wp_idx < len(wps) - 1
+                    and self._manhattan(self.agent_pos, wps[self._exit_wp_idx]) <= 1
+                ):
+                    self._exit_wp_idx += 1
+                    self._prev_exit_dist = None   # re-baseline on advance
+                target = wps[self._exit_wp_idx]
+                cur = self._manhattan(self.agent_pos, target)
+                if self._prev_exit_dist is not None:
+                    reward += 2.0 * self.exit_approach_coef * (self._prev_exit_dist - cur)
                 self._prev_exit_dist = cur
-                self._exit_phase = phase
 
         # --- camouflage exit shaping --------------------------------------------
         # Same trap as the weapon case: after collecting the one-time
@@ -920,6 +945,114 @@ class MiniGridMultiStyles(MiniGridEnv):
                 if self._prev_bypass_dist is not None:
                     reward += self.exit_approach_coef * (self._prev_bypass_dist - cur)
                 self._prev_bypass_dist = cur
+
+        # --- daredevil boots->lava->goal shaping --------------------------------
+        # Unlike weapon/camouflage/bypass, daredevil had no dense pull, so it
+        # relied solely on the one-time first_lava_bonus. With a larger view the
+        # agent can see the lava strip and learns to avoid it before ever
+        # discovering that boots make it safe, getting stuck in a lava-avoidance
+        # local optimum. Give a two-phase potential-based pull: first toward the
+        # boots, then toward the goal (which sits behind the lava strip, so the
+        # pull deliberately routes the now-protected agent across the lava).
+        # Potential-based + re-baselined on the phase switch, so it telescopes
+        # per leg and leaves the optimum unchanged.
+        if (
+            self.shape_rewards
+            and self.exit_approach_coef
+            and self.target_style == "daredevil"
+        ):
+            if self._agent_has_boots():
+                waypoint = self.goal_pos
+                phase = "goal"
+            else:
+                ground_boots = [
+                    b for b in self._boots_positions
+                    if isinstance(self.grid.get(*b), Boots)
+                ]
+                if ground_boots:
+                    waypoint = min(
+                        ground_boots,
+                        key=lambda b: self._manhattan(self.agent_pos, b),
+                    )
+                    phase = "boots"
+                else:
+                    waypoint = self.goal_pos
+                    phase = "goal"
+            cur = self._manhattan(self.agent_pos, waypoint)
+            # only reward within a phase; on a phase switch just re-baseline
+            if self._dd_phase == phase and self._prev_dd_dist is not None:
+                reward += self.exit_approach_coef * (self._prev_dd_dist - cur)
+            self._prev_dd_dist = cur
+            self._dd_phase = phase
+
+        # --- weapon pre-kill pickup->enemy shaping ------------------------------
+        # Weapon only had a *post*-kill pull; pre-kill the sole signal is the
+        # sparse goal across the lava on row 8, so the policy heads east into lava.
+        # Dense two-phase pull: toward the weapon item, then the target enemy's
+        # west (non-cone) attack tile. Post-kill exit shaping then handles
+        # gate->goal around the lava.
+        if (
+            self.shape_rewards
+            and self.exit_approach_coef
+            and self.target_style == "weapon"
+            and not self.killed_with_weapon
+        ):
+            waypoint = None
+            phase = None
+            if not isinstance(self.carrying, Weapon):
+                ground = [w for w in self._weapon_positions
+                          if isinstance(self.grid.get(*w), Weapon)]
+                if ground:
+                    waypoint = min(ground, key=lambda w: self._manhattan(self.agent_pos, w))
+                    phase = "weapon"
+            if waypoint is None:
+                tgt = self._weapon_target_enemy()
+                cands = []
+                if tgt in (None, 1) and self.enemy1_alive:
+                    cands.append((self.enemy1_pos[0] - 1, self.enemy1_pos[1]))
+                if tgt in (None, 2) and self.enemy2_alive:
+                    cands.append((self.enemy2_pos[0] - 1, self.enemy2_pos[1]))
+                if cands:
+                    waypoint = min(cands, key=lambda p: self._manhattan(self.agent_pos, p))
+                    phase = "enemy"
+            if waypoint is not None:
+                cur = self._manhattan(self.agent_pos, waypoint)
+                if self._wpn_phase == phase and self._prev_wpn_dist is not None:
+                    reward += self.exit_approach_coef * (self._prev_wpn_dist - cur)
+                self._prev_wpn_dist = cur
+                self._wpn_phase = phase
+
+        # --- camouflage pre-traversal pickup->cone shaping ----------------------
+        # Same trap as weapon: pre-traversal the only pull is the goal across the
+        # lava. Dense two-phase pull: toward the camo item, then the side gate
+        # (reaching it requires passing through the target detection cone, earning
+        # traversal credit while protected). Post-traversal exit shaping then
+        # handles gate->goal.
+        if (
+            self.shape_rewards
+            and self.exit_approach_coef
+            and self.target_style == "camouflage"
+            and not self.traversed_detection_with_camo
+        ):
+            waypoint = None
+            phase = None
+            if not isinstance(self.carrying, Camouflage):
+                ground = [c for c in self._camo_positions
+                          if isinstance(self.grid.get(*c), Camouflage)]
+                if ground:
+                    waypoint = min(ground, key=lambda c: self._manhattan(self.agent_pos, c))
+                    phase = "camo"
+            if waypoint is None:
+                gate = self._weapon_exit_gate()
+                gates = [gate] if gate is not None else [(14, 5), (14, 11)]
+                waypoint = min(gates, key=lambda g: self._manhattan(self.agent_pos, g))
+                phase = "zone"
+            if waypoint is not None:
+                cur = self._manhattan(self.agent_pos, waypoint)
+                if self._camo_phase == phase and self._prev_camo_dist is not None:
+                    reward += self.exit_approach_coef * (self._prev_camo_dist - cur)
+                self._prev_camo_dist = cur
+                self._camo_phase = phase
 
         info = dict(info)
 
@@ -999,13 +1132,15 @@ if __name__ == "__main__":
 
     env = gym.make(
         "MiniGrid-MultiStyles-v0",
-        target_style="daredevil",
+        target_style="camouflage",
         target_bonus=1.0,
         non_target_penalty=-1.0,
         render_mode="human",
         max_steps=100,
-        show_detection_zones=True,
+        bypass_corridor=None,
+        # show_detection_zones=True,
         free_item_placement=True,
+        agent_view_size=7,
     )
 
     obs, _ = env.reset()

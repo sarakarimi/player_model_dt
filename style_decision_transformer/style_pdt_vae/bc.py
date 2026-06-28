@@ -447,7 +447,7 @@ if __name__ == "__main__":
     results, success = evaluate_bc_oracle(
         policies=policies,
         num_episodes_per_style=50,
-        max_ep_len=100,
+        max_ep_len=130,
         eval_device=device,
     )
     plot_eval_results(results, success)

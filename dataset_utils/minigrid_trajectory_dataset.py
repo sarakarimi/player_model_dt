@@ -66,16 +66,14 @@ def multi_style_controls_from_episode_summary(
     Build a float32 control vector from an episode_summary dict produced by
     MiniGridMultiStyles (the 4-style env).  Returns zeros for missing fields.
 
-    Dimensions: [risk_taking, stealth_exposure, route_directness]
+    Dimensions: [risk_taking, stealth_exposure, confrontation]
 
-    risk_taking      — how much danger the agent exposed itself to (the most
-                       dangerous thing it did): combat, lava, or half-weighted
-                       detection cones.  low=bypass, mid=camo, high=weapon/daredevil.
-    stealth_exposure — covertness: how much it handled danger by staying hidden /
-                       avoiding rather than confronting.  very-high=bypass,
-                       high=camo, mid=daredevil, low=weapon.
-    route_directness — path-length optimality (shortest_dist / steps taken).
-                       high=daredevil, low=bypass.
+    risk_taking      — how much danger it entered (worst of combat / lava /
+                       half-weighted detection). low=bypass, high=daredevil.
+    stealth_exposure — how hidden/safe it stayed; drops for UNPROTECTED exposure
+                       only. high=bypass/camo, low=weapon/daredevil.
+    confrontation    — how much it directly engaged the enemy (enemy-adjacent
+                       steps). high=weapon, zero=bypass/daredevil.
 
     The normalising constants set the point at which a "full" engagement of each
     kind saturates near 1; they are tunable from the real count distributions
@@ -100,12 +98,12 @@ def multi_style_controls_from_episode_summary(
 
     risk_taking      = np.clip(max(adj_c, lava_c, 0.5 * cone_c), 0.0, 1.0)
     stealth_exposure = np.clip(
-        1.0 - 0.85 * adj_c - 0.50 * expo_c - 0.20 * cone_c, 0.0, 1.0
+        1.0 - 0.50 * adj_c - 0.80 * expo_c - 0.20 * cone_c, 0.0, 1.0
     )
-    route_directness = np.clip(direct_dist / max(total_steps, 1), 0.0, 1.0)
+    confrontation = adj_c
 
     return np.array(
-        [risk_taking, stealth_exposure, route_directness],
+        [risk_taking, stealth_exposure, confrontation],
         dtype=np.float32,
     )
 
@@ -176,7 +174,7 @@ class TrajectoryDataset(Dataset):
 
             # total target per style/group, split as evenly as possible across
             # its sub-datasets (the first sub-path absorbs any remainder).
-            group_samples = 2000
+            group_samples = 1000
             per_sub = [group_samples // n_sub] * n_sub
             per_sub[0] += group_samples - sum(per_sub)
 
@@ -199,7 +197,6 @@ class TrajectoryDataset(Dataset):
                 merge_timesteps.extend(timesteps)
                 merge_tasks.extend(tasks)
                 merge_infos.extend(terminal_infos)
-
         self.actions = merge_actions
         self.rewards = merge_rewards
         self.dones = merge_dones
@@ -209,7 +206,6 @@ class TrajectoryDataset(Dataset):
         self.timesteps = merge_timesteps
         self.tasks = merge_tasks
         self.infos = merge_infos
-
         # ==================================
         # remove trajectories with length 0
 
@@ -360,13 +356,16 @@ class TrajectoryDataset(Dataset):
         timesteps = [torch.arange(len(s)) for s in states]
 
         # Sampling trajectories based on their lengths and returns
+        print(len(observations))
         top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
         print(top_seq_lengths)
         seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
-        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=10)
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
+        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        # print(len(states))
+        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
         # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
         # index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
-
 
         if self.select_highest_count_return_group:  # TEMPORARY TEST
             indexes = self.get_highest_count_return_group(
@@ -393,9 +392,10 @@ class TrajectoryDataset(Dataset):
         timesteps = [timesteps[idx] for idx in indexes]
         terminal_infos = [raw_terminal_infos[idx] for idx in indexes]
 
-        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
+        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=20)
         print(top_seq_lengths)
-        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=10)
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
+        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.3)
         # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
 
 
@@ -436,6 +436,31 @@ class TrajectoryDataset(Dataset):
             if len(top_seq_returns) == top_k:
                 break
         return top_seq_returns
+
+    @staticmethod
+    def get_trajectories_above_return(states, returns, return_threshold):
+        """Select every (length, return) group whose return is higher than
+        `return_threshold`.
+
+        Mirrors get_top_trajectory_lengths / get_top_trajectory_returns, but
+        instead of keeping the top-k groups it keeps ALL groups with
+        ret > return_threshold.
+
+        Returns a list of (length, ret, count, indices) tuples, sorted by
+        return desc (same shape as get_top_trajectory_returns).
+        """
+        lengths = [len(s) for s in states]
+        returns = [float(r) for r in returns]
+        groups = {}
+        for idx, key in enumerate(zip(lengths, returns)):
+            groups.setdefault(key, []).append(idx)
+        seq_returns = [
+            (length, ret, len(indices), indices)
+            for (length, ret), indices in groups.items()
+            if ret > return_threshold
+        ]
+        seq_returns.sort(key=lambda x: x[1], reverse=True)
+        return seq_returns
 
     @staticmethod
     def get_highest_count_return_group(states, returns, num_samples=500, top_k=5):

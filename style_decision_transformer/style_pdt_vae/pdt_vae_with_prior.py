@@ -14,7 +14,7 @@ from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 from style_decision_transformer.utils.utils import cluster_latents, plot_embeddings
-from trajectory_gpt2 import GPT2Model
+from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
 # style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
 style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
@@ -292,6 +292,7 @@ class DecisionTransformer(nn.Module):
             returns_to_go = returns_to_go.unsqueeze(-1)
         returns_embeddings = self.embed_return(returns_to_go)
 
+        timesteps = timesteps.clamp(0, self.embed_timestep.num_embeddings - 1)
         time_embeddings = self.embed_timestep(timesteps)
 
         state_embeddings = state_embeddings + time_embeddings
@@ -411,6 +412,7 @@ class StyleVAEPromptDT(nn.Module):
         full_actions = torch.clamp(full_actions.long(), 0, self.dt.act_dim - 1)
         a_emb = self.dt.embed_action(full_actions)
 
+        full_timesteps = full_timesteps.clamp(0, self.dt.embed_timestep.num_embeddings - 1)
         t_emb = self.dt.embed_timestep(full_timesteps)
         s_emb = s_emb + t_emb
         a_emb = a_emb + t_emb
@@ -513,7 +515,7 @@ def train_style_prompt_dt(
     eval_every: int = 10,
     eval_episodes_per_style: int = 50,
     max_ep_len: int = 100,
-    initial_rtg: float = 2.1,
+    initial_rtg: float = 3.2,
     beta_warmup_epochs: int = 0,
 ):
     model.to(device)
@@ -662,7 +664,7 @@ def evaluate_online_controls(
     num_episodes_per_style: int = 10,
     max_ep_len: int = 100,
     device: str = "cpu",
-    initial_rtg: float = 2.1,
+    initial_rtg: float = 3.2,
     env_kwargs: dict = None,
     deterministic_prior: bool = True,
     max_context: int = None,
@@ -686,7 +688,7 @@ def evaluate_online_controls(
         max_context = model.dt.max_length
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 100
+        env_kwargs["max_steps"] = 130
 
     # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
     # Fallback when dataset has no controls stored (should not happen with new datasets).
@@ -918,13 +920,21 @@ if __name__ == "__main__":
     dataset = MiniGridDataset(trajectory_paths=paths, **dataset_params)
     loader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=dataset.collate_fn)
 
+    # The timestep embedding (embed_timestep) is sized by max_ep_len and is NOT
+    # clamped, so it must cover the longest trajectory in the data. Newer data
+    # collected with max_steps=130 has trajectories up to ~128 steps, which
+    # overflowed the old hard-coded 100. Derive it from the data (+buffer) so it
+    # auto-adjusts if max_steps changes again.
+    model_max_ep_len = dataset.max_ep_len + 1
+    print(f"max trajectory length in data = {dataset.max_ep_len} -> max_ep_len = {model_max_ep_len}")
+
     model = StyleVAEPromptDT(
         state_dim=9,
         act_dim=7,
         hidden_size=128,
         latent_dim=16,
         max_length=max_len,
-        max_ep_len=100,
+        max_ep_len=model_max_ep_len,
         action_tanh=False,
         beta=0.0085,
         control_dim=control_dim,
@@ -937,7 +947,7 @@ if __name__ == "__main__":
     train_style_prompt_dt(
         model=model,
         dataloader=loader,
-        num_epochs=100,
+        num_epochs=200,
         device=device,
         lr=1e-3,
         grad_clip=1.0,

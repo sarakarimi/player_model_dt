@@ -35,7 +35,7 @@ from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
-from trajectory_gpt2 import GPT2Model
+from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ def evaluate_online_control(
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
     eval_device:            str   = "cpu",
-    initial_rtg:            float = 3.0,
+    initial_rtg:            float = 3.2,
     env_kwargs:             dict  = None,
 ):
     """
@@ -377,7 +377,7 @@ def evaluate_online_control(
     eval_model.eval()
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 100
+        env_kwargs["max_steps"] = 130
 
     # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
     # Fallback when dataset has no controls stored (should not happen with new datasets).
@@ -574,7 +574,7 @@ def train_control_dt(
     eval_every:              int   = 10,
     eval_episodes_per_style: int   = 50,
     max_ep_len:              int   = 100,
-    initial_rtg:             float = 3.0,
+    initial_rtg:             float = 3.2,
 ):
     model.to(device)
     model.train()
@@ -698,7 +698,7 @@ if __name__ == "__main__":
         hidden_size=128,
         control_dim=CONTROL_DIM,
         max_length=max_len,
-        max_ep_len=100,
+        max_ep_len=130,
         action_tanh=False,
         n_layer=4,
         n_head=8,

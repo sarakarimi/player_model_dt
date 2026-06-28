@@ -27,7 +27,7 @@ from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
-from trajectory_gpt2 import GPT2Model
+from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
 # style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
 style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
@@ -454,7 +454,7 @@ def evaluate_online_prompting(
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
     eval_device:            str   = "cpu",
-    initial_rtg:            float = 3.0,
+    initial_rtg:            float = 3.2,
     env_kwargs:             dict  = None,
 ):
     """
@@ -468,7 +468,7 @@ def evaluate_online_prompting(
     eval_model.eval()
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 100
+        env_kwargs["max_steps"] = 130
 
     state_mean = torch.tensor(eval_dataset.state_mean, device=eval_device, dtype=torch.float32)
     state_std  = torch.tensor(eval_dataset.state_std,  device=eval_device, dtype=torch.float32)
@@ -662,7 +662,7 @@ def train_prompting_dt(
     eval_every:          int   = 10,
     eval_episodes_per_style: int = 50,
     max_ep_len:          int   = 100,
-    initial_rtg:         float = 3.0,
+    initial_rtg:         float = 3.2,
 ):
     model.to(device)
     model.train()
@@ -796,7 +796,7 @@ if __name__ == "__main__":
         act_dim=7,
         hidden_size=128,
         max_length=max_len,
-        max_ep_len=100,
+        max_ep_len=130,
         action_tanh=False,
         n_layer=4,
         n_head=8,

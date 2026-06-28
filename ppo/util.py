@@ -8,8 +8,8 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "camouflage" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
-CORRIDOR_DIR = "upper" #"lower" # lower Upper
+MODE = "weapon" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+CORRIDOR_DIR = "lower" #"lower" # lower Upper
 EASY_ENV = False
 
 def parse_args():
@@ -70,7 +70,7 @@ def parse_args():
         help="the size of the hidden layers",
     )
     parser.add_argument(
-        "--view_size", type=int, default=7, help="the size of the view"
+        "--view_size", type=int, default=3, help="the size of the view"
     )
     parser.add_argument(
         "--total_timesteps",
@@ -144,7 +144,7 @@ def parse_args():
     parser.add_argument(
         "--max_steps",
         type=int,
-        default=100, # 130 for weapon mode, 100 for bypass and camouflage and daredevil
+        default=130, # 130 for weapon mode, 100 for bypass and camouflage and daredevil
         help="the maximum number of steps total",
     )
     parser.add_argument(
