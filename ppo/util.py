@@ -9,7 +9,7 @@ import torch as t
 
 
 MODE = "weapon" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
-CORRIDOR_DIR = "lower" #"lower" # lower Upper
+CORRIDOR_DIR = None #"lower" #"lower" # lower Upper
 EASY_ENV = False
 
 def parse_args():

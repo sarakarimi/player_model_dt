@@ -251,6 +251,7 @@ class MiniGridMultiStyles(MiniGridEnv):
         style_step_penalty: float =  -0.004, # -0.004,
         pickup_bonus: float = 0.2,
         drop_penalty: float = -0.2,
+        wrong_item_penalty: float = -0.3,
         kill_bonus: float = 0.4,
         exit_approach_coef: float = 0.05,
         first_detection_bonus: float = 0.3,
@@ -284,6 +285,7 @@ class MiniGridMultiStyles(MiniGridEnv):
         self.style_step_penalty = style_step_penalty
         self.pickup_bonus = pickup_bonus
         self.drop_penalty = drop_penalty
+        self.wrong_item_penalty = wrong_item_penalty
         self.kill_bonus = kill_bonus
         self.exit_approach_coef = exit_approach_coef
         self.first_detection_bonus = first_detection_bonus
@@ -721,6 +723,11 @@ class MiniGridMultiStyles(MiniGridEnv):
                     self.boots_picked = True
                     if self.target_style == "daredevil":
                         reward += self.pickup_bonus
+                # penalise grabbing the wrong item under an item-based style
+                expected = {"weapon": Weapon, "camouflage": Camouflage,
+                            "daredevil": Boots}.get(self.target_style)
+                if expected is not None and not isinstance(self.carrying, expected):
+                    reward += self.wrong_item_penalty
 
             # drop (first drop after first pickup of that item)
             if prev_carrying is not None and self.carrying is None:
