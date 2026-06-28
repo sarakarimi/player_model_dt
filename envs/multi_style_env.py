@@ -208,13 +208,13 @@ class MiniGridMultiStyles(MiniGridEnv):
      y= 2:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y= 3:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y= 4:    #  .  #  #  #  #  #  #  #  #  #  #  #  #  #  .  #
-     y= 5:    #  .  #  B  B  .  .  W  W  .  .  d  d  d  .  .  #
-     y= 6:    #  .  #  B  B  C  C  W  W  .  .  E  d  d  #  .  #
-     y= 7:    #  .  #  .  .  C  C  .  .  .  .  d  d  d  #  .  #
-     y= 8:    #  A  .  .  .  .  .  L  L  L  L  L  L  L  .  G  #
-     y= 9:    #  .  #  .  .  C  C  .  .  .  .  d  d  d  #  .  #
-     y=10:    #  .  #  B  B  C  C  W  W  .  .  E  d  d  #  .  #
-     y=11:    #  .  #  B  B  .  .  W  W  .  .  d  d  d  .  .  #
+     y= 5:    #  .  #  B  B  .  .  .  .  .  .  E  d  d  .  .  #
+     y= 6:    #  .  #  B  B  .  .  .  .  .  .  d  d  d  #  .  #
+     y= 7:    #  .  #  .  .  .  .  .  .  .  .  d  d  d  #  .  #
+     y= 8:    #  A  .  .  C  W  .  L  L  L  L  L  L  L  .  G  #
+     y= 9:    #  .  #  .  .  .  .  .  .  .  .  d  d  d  #  .  #
+     y=10:    #  .  #  B  B  .  .  .  .  .  .  d  d  d  #  .  #
+     y=11:    #  .  #  B  B  .  .  .  .  .  .  E  d  d  .  .  #
      y=12:    #  .  #  #  #  #  #  #  #  #  #  #  #  #  #  .  #
      y=13:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
      y=14:    #  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  #
@@ -454,6 +454,12 @@ class MiniGridMultiStyles(MiniGridEnv):
             if y not in (5, 8, 11):
                 self.put_obj(Wall(), 14, y)
 
+        # Some obstacle walls
+        self.put_obj(Wall(), 7, 6)
+        self.put_obj(Wall(), 7, 7)
+        self.put_obj(Wall(), 7, 9)
+        self.put_obj(Wall(), 7, 10)
+
         # --- lava strip on row 8, cols 7..13 ---------------------------------
         for x in range(7, 14):
             self.put_obj(HazardTile(), x, 8)
@@ -463,7 +469,7 @@ class MiniGridMultiStyles(MiniGridEnv):
         # the enemy). Size is preserved by extending forward, not adding cells.
         # E1 (north chamber): faces east (dir=0). Front-only 3x3 cone, cols
         # 11..13 rows 5..7.
-        self.enemy1_pos = (11, 6)
+        self.enemy1_pos = (11, 5)
         self.enemy1_box = (11, 13, 5, 7)  # x_min, x_max, y_min, y_max
         self.enemy1_obj = Enemy(dir=0)
         self.put_obj(self.enemy1_obj, *self.enemy1_pos)
@@ -471,71 +477,31 @@ class MiniGridMultiStyles(MiniGridEnv):
 
         # E2 (south chamber): faces east (dir=0). Front-only 3x4 cone, cols
         # 11..13 rows 9..12 (enemy column + 2 forward).
-        self.enemy2_pos = (11, 10)
+        self.enemy2_pos = (11, 11)
         self.enemy2_box = (11, 13, 9, 11)
         self.enemy2_obj = Enemy(dir=0)
         self.put_obj(self.enemy2_obj, *self.enemy2_pos)
         self.enemy2_alive = True
 
-        # --- items (with optional small randomisation) -----------------------
-        # Boots are placed off the east-west axis so daredevil requires a
-        # detour rather than a straight-line lava traversal.
-        def pick(choices, default):
-            return random.choice(choices) if self.randomize_layout else default
+        # --- items -----------------------------------------------------------
+        # Camouflage and weapon are fixed single tiles on the entry row (y=8),
+        # just west of the lava, so both styles approach from the identical
+        # corridor and diverge only after pickup (kill enemy vs. cross a cone).
+        c_pos, w_pos = (4, 8), (5, 8)
+        self.put_obj(Camouflage(), *c_pos)
+        self.put_obj(Weapon(), *w_pos)
+        self._camo_positions = [c_pos]
+        self._weapon_positions = [w_pos]
 
+        # Boots still spawn in a 2x2 zone top and bottom (mirror-symmetric
+        # across the lava row) so daredevil keeps top/bottom route diversity.
         if self.free_item_placement:
-            # Dedicated per-item zones: a 2x2 square top and bottom (mirror-
-            # symmetric across the lava row). Each item spawns in a random cell
-            # of its own zone, so styles stay spatially separable while keeping
-            # top/bottom route diversity. Columns are disjoint (boots x3-4,
-            # camo x5-6, weapon x7-8), so items never collide.
-            boots_cells  = [(3, 5), (4, 5), (3, 6), (4, 6),
-                            (3, 10), (4, 10), (3, 11), (4, 11)]
-            camo_top     = [(5, 6), (6, 6), (5, 7), (6, 7)]
-            camo_bot     = [(5, 9), (6, 9), (5, 10), (6, 10)]
-            weapon_top   = [(7, 5), (8, 5), (7, 6), (8, 6)]
-            weapon_bot   = [(7, 10), (8, 10), (7, 11), (8, 11)]
-
-            # Only when training that style: restrict its TARGET item to the
-            # committed corridor side so it never sits across the lava from the
-            # target enemy/cone (which would force a deadly crossing). Otherwise
-            # (item is just a distractor, or no side) it can be either top/bottom.
-            def _side_cells(style, top, bot):
-                if self.target_style == style and self.bypass_corridor == "upper":
-                    return top
-                if self.target_style == style and self.bypass_corridor == "lower":
-                    return bot
-                return top + bot
-
-            weapon_cells = _side_cells("weapon", weapon_top, weapon_bot)
-            camo_cells = _side_cells("camouflage", camo_top, camo_bot)
-
-            w_pos = random.choice(weapon_cells)
-            c_pos = random.choice(camo_cells)
-            b_pos = random.choice(boots_cells)
-            self.put_obj(Weapon(), *w_pos)
-            self.put_obj(Camouflage(), *c_pos)
-            self.put_obj(Boots(), *b_pos)
-            self._boots_positions = [b_pos]
-            self._weapon_positions = [w_pos]
-            self._camo_positions = [c_pos]
+            b_pos = random.choice([(3, 5), (4, 5), (3, 6), (4, 6),
+                                   (3, 10), (4, 10), (3, 11), (4, 11)])
         else:
-            w1 = pick([(7, 5), (8, 5)], (7, 5))
-            w2 = pick([(3, 11), (4, 11)], (3, 11))
-            c1 = pick([(5, 5), (6, 5)], (5, 5))
-            c2 = pick([(5, 11), (6, 11)], (5, 11))
-            b1 = pick([(3, 6), (4, 6)], (3, 6))
-            b2 = pick([(8, 11), (8, 12)], (8, 11))
-
-            self.put_obj(Weapon(), *w1)
-            self.put_obj(Weapon(), *w2)
-            self.put_obj(Camouflage(), *c1)
-            self.put_obj(Camouflage(), *c2)
-            self.put_obj(Boots(), *b1)
-            self.put_obj(Boots(), *b2)
-            self._boots_positions = [b1, b2]
-            self._weapon_positions = [w1, w2]
-            self._camo_positions = [c1, c2]
+            b_pos = (3, 6)
+        self.put_obj(Boots(), *b_pos)
+        self._boots_positions = [b_pos]
 
         # --- goal ------------------------------------------------------------
         self.goal_pos = (15, 8)
@@ -1138,7 +1104,7 @@ if __name__ == "__main__":
         render_mode="human",
         max_steps=100,
         bypass_corridor=None,
-        # show_detection_zones=True,
+        show_detection_zones=True,
         free_item_placement=True,
         agent_view_size=7,
     )
