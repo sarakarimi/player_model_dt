@@ -173,7 +173,7 @@ class MiniGridFiveStyles(MiniGridEnv):
      y= 5:    #  .  .  W  .  .  d  d  d  d  d  .  #
      y= 6:    #  .  .  B  .  .  E  d  d  d  d  G  #
      y= 7:    #  .  .  .  .  .  #  #  #  d  d  .  #
-     y= 8:    #  A  .  .  .  .  .  .  .  .  .  .  #
+     y= 8:    #  A  .  .  .  .  #  #  #  .  .  .  #
      y= 9:    #  .  .  .  .  .  ~  ~  ~  ~  ~  .  #
      y=10:    #  .  .  .  .  .  ~  ~  ~  ~  ~  .  #
      y=11:    #  .  .  1  .  .  ~  ~  ~  ~  ~  .  #
@@ -304,21 +304,29 @@ class MiniGridFiveStyles(MiniGridEnv):
         # top bar walls (with the camo-guarded gap at x9,10) and lava strip
         for x in (6, 7, 8):
             self.put_obj(Wall(), x, 7)
+            self.put_obj(Wall(), x, 8)
         for y in range(9, 12):
             for x in range(6, 11):
                 self.put_obj(HazardTile(), x, y)
 
-        # items
-        self.put_obj(Camouflage(), 1, 3)
-        self.put_obj(Weapon(), 3, 5)
-        b_pos = (random.choice([2, 3, 4]), random.choice([5, 6, 7])) if self.randomize_layout else (3, 6)
-        if b_pos == (3, 5):
-            b_pos = (3, 6)
-        self.put_obj(Boots(), *b_pos)
-
-        # portals: head 1 (entrance, faces up) -> head 2 (exit, faces down by goal)
-        self.portal_in_pos = (random.choice([2, 3, 4]), random.choice([9, 10, 11])) if self.randomize_layout else (3, 11)
+        # portal exit is fixed by the goal
         self.portal_out_pos = (11, 3)
+
+        # items: fixed cells, or random within per-item regions. The weapon and
+        # camo regions match the three-style env; boots and portal-in keep their
+        # own regions. Heads 2 / enemy / goal / agent stay fixed.
+        if self.randomize_layout:
+            occupied = {self.enemy_pos, self.goal_pos, self.portal_out_pos, (1, 8)}
+            c_pos = self._rand_cell((1, 2), (2, 4), occupied)      # camo
+            w_pos = self._rand_cell((3, 4), (3, 5), occupied)      # weapon
+            b_pos = self._rand_cell((2, 3), (6, 7), occupied)      # boots
+            self.portal_in_pos = self._rand_cell((2, 4), (11, 11), occupied)  # portal-in, always y=11
+        else:
+            c_pos, w_pos, b_pos = (1, 3), (3, 5), (3, 6)
+            self.portal_in_pos = (3, 11)
+        self.put_obj(Camouflage(), *c_pos)
+        self.put_obj(Weapon(), *w_pos)
+        self.put_obj(Boots(), *b_pos)
         self.put_obj(Portal(), *self.portal_in_pos)
         self.put_obj(Portal(color="green"), *self.portal_out_pos)
 
@@ -345,6 +353,15 @@ class MiniGridFiveStyles(MiniGridEnv):
     @staticmethod
     def _manhattan(a, b) -> float:
         return float(abs(a[0] - b[0]) + abs(a[1] - b[1]))
+
+    @staticmethod
+    def _rand_cell(xr, yr, occupied):
+        """Random free cell within [xr]x[yr], avoiding `occupied` (mutated)."""
+        while True:
+            p = (random.randint(xr[0], xr[1]), random.randint(yr[0], yr[1]))
+            if p not in occupied:
+                occupied.add(p)
+                return p
 
     def _agent_has_weapon(self) -> bool:
         return isinstance(self.carrying, Weapon)
@@ -514,6 +531,7 @@ if __name__ == "__main__":
         target_bonus=1.0,
         non_target_penalty=-1.0,
         render_mode="human",
+        randomize_layout=True,
         max_steps=100,
         agent_view_size=7,
     )
