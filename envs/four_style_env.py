@@ -151,18 +151,18 @@ class Portal(WorldObj):
 
 # --- Environment ---------------------------------------------------------------
 
-class MiniGridFiveStyles(MiniGridEnv):
+class MiniGridFourStyles(MiniGridEnv):
     """
-    13x13 five-style MiniGrid env (extends the three-style env with a lava
-    daredevil route and a one-way portal route).
+    13x13 four-style MiniGrid env (extends the three-style env with a lava
+    daredevil route and a one-way portal route). The goal is unreachable
+    without one of the four mechanics, so there is no plain "bypass" route.
 
-      bypass     - reach the goal avoiding the enemy / detection / lava.
       weapon     - pick up the weapon, kill the enemy (toggle adjacent), reach goal.
       camouflage - pick up camo, pass through the detection zone, reach goal.
       daredevil  - pick up boots, traverse the lava, reach goal.
       portal     - step on portal head 1 -> teleport to head 2 (by the goal).
 
-    Achievement priority: weapon > camouflage > daredevil > portal > bypass.
+    Achievement priority: weapon > camouflage > daredevil > portal.
 
            x: 0  1  2  3  4  5  6  7  8  9 10 11 12
      y= 0:    #  #  #  #  #  #  #  #  #  #  #  #  #
@@ -184,7 +184,7 @@ class MiniGridFiveStyles(MiniGridEnv):
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
-    VALID_STYLES = ("bypass", "weapon", "camouflage", "daredevil", "portal")
+    VALID_STYLES = ("weapon", "camouflage", "daredevil", "portal")
 
     def __init__(
         self,
@@ -201,6 +201,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         detection_penalty: float = 0.0,
         lava_penalty: float = 0.0,
         pickup_bonus: float = 0.2,
+        drop_penalty: float = -0.2,
         kill_bonus: float = 0.2,
         first_lava_bonus: float = 0.2,
         first_detection_bonus: float = 0.2,
@@ -218,6 +219,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         self.detection_penalty = detection_penalty
         self.lava_penalty = lava_penalty
         self.pickup_bonus = pickup_bonus
+        self.drop_penalty = drop_penalty
         self.kill_bonus = kill_bonus
         self.first_lava_bonus = first_lava_bonus
         self.first_detection_bonus = first_detection_bonus
@@ -251,6 +253,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         self.style_used: Optional[str] = None
 
         self.weapon_picked = self.camo_picked = self.boots_picked = False
+        self.weapon_dropped = self.camo_dropped = self.boots_dropped = False
 
         # control-metric counters
         self.step_count = 0
@@ -272,7 +275,7 @@ class MiniGridFiveStyles(MiniGridEnv):
 
     @staticmethod
     def _gen_mission() -> str:
-        return "five_style_policy"
+        return "four_style_policy"
 
     # --- Grid construction -----------------------------------------------------
 
@@ -282,6 +285,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         self.used_portal = self.detected = self.died_in_lava = False
         self.style_used = None
         self.weapon_picked = self.camo_picked = self.boots_picked = False
+        self.weapon_dropped = self.camo_dropped = self.boots_dropped = False
         self.step_count = 0
         self.min_distance_to_enemy = float("inf")
         self.sum_distance_to_enemy = 0.0
@@ -334,7 +338,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         self.agent_dir = 0
         self.place_agent(top=(1, 8), size=(1, 1), rand_dir=False)
 
-        self.mission = "Reach the goal via bypass, weapon, camouflage, daredevil, or portal."
+        self.mission = "Reach the goal via weapon, camouflage, daredevil, or portal."
 
     # --- Helpers ---------------------------------------------------------------
 
@@ -379,7 +383,7 @@ class MiniGridFiveStyles(MiniGridEnv):
         self.killed_with_weapon = True
         self.style_used = "weapon"
 
-    def _achieved_style(self) -> str:
+    def _achieved_style(self) -> Optional[str]:
         if self.killed_with_weapon:
             return "weapon"
         if self.traversed_detection:
@@ -388,7 +392,7 @@ class MiniGridFiveStyles(MiniGridEnv):
             return "daredevil"
         if self.used_portal:
             return "portal"
-        return "bypass"
+        return None  # goal unreachable without a mechanic; no plain bypass style
 
     # --- Step override ---------------------------------------------------------
 
@@ -420,6 +424,21 @@ class MiniGridFiveStyles(MiniGridEnv):
                 self.boots_picked = True
                 if self.target_style == "daredevil":
                     reward += self.pickup_bonus
+
+        # drop penalty (first drop of the target item after pickup)
+        if prev_carrying is not None and self.carrying is None:
+            if isinstance(prev_carrying, Weapon) and self.weapon_picked and not self.weapon_dropped:
+                self.weapon_dropped = True
+                if self.target_style == "weapon":
+                    reward += self.drop_penalty
+            elif isinstance(prev_carrying, Camouflage) and self.camo_picked and not self.camo_dropped:
+                self.camo_dropped = True
+                if self.target_style == "camouflage":
+                    reward += self.drop_penalty
+            elif isinstance(prev_carrying, Boots) and self.boots_picked and not self.boots_dropped:
+                self.boots_dropped = True
+                if self.target_style == "daredevil":
+                    reward += self.drop_penalty
 
         # portal: Portal tiles are type 'lava', so super().step() flagged
         # termination — override it, and teleport from the entrance head.
@@ -516,8 +535,8 @@ class MiniGridFiveStyles(MiniGridEnv):
 
 def register_env():
     gym.envs.registration.register(
-        id="MiniGrid-FiveStyles-v0",
-        entry_point=MiniGridFiveStyles,
+        id="MiniGrid-FourStyles-v0",
+        entry_point=MiniGridFourStyles,
     )
 
 
@@ -526,7 +545,7 @@ def register_env():
 if __name__ == "__main__":
     register_env()
     env = gym.make(
-        "MiniGrid-FiveStyles-v0",
+        "MiniGrid-FourStyles-v0",
         target_style="portal",
         target_bonus=1.0,
         non_target_penalty=-1.0,
