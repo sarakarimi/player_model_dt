@@ -263,6 +263,10 @@ class MiniGridFourStyles(MiniGridEnv):
         self.items_picked_count = 0
         self.detection_steps = 0
         self.lava_steps = 0
+        self.lava_adjacent_steps = 0
+        self.enemy_adjacent_steps = 0
+        self.enemy_near_unprotected_steps = 0
+        self.portal_steps = 0
 
         mission_space = MissionSpace(mission_func=self._gen_mission)
         super().__init__(
@@ -293,6 +297,10 @@ class MiniGridFourStyles(MiniGridEnv):
         self.items_picked_count = 0
         self.detection_steps = 0
         self.lava_steps = 0
+        self.lava_adjacent_steps = 0
+        self.enemy_adjacent_steps = 0
+        self.enemy_near_unprotected_steps = 0
+        self.portal_steps = 0
 
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
@@ -405,10 +413,22 @@ class MiniGridFourStyles(MiniGridEnv):
         if action == 3:
             self.items_picked_count += 1
 
+        ax, ay = self.agent_pos
         if self.enemy_alive and self.enemy_pos is not None:
             d = self._manhattan(self.agent_pos, self.enemy_pos)
             self.min_distance_to_enemy = min(self.min_distance_to_enemy, d)
             self.sum_distance_to_enemy += d
+            if d == 1:
+                self.enemy_adjacent_steps += 1
+            if d <= 2 and not self._agent_has_camouflage():
+                self.enemy_near_unprotected_steps += 1
+        neighbours = [(ax + 1, ay), (ax - 1, ay), (ax, ay + 1), (ax, ay - 1)]
+        if any(0 <= nx < self.grid.width and 0 <= ny < self.grid.height
+               and isinstance(self.grid.get(nx, ny), HazardTile)
+               for nx, ny in neighbours):
+            self.lava_adjacent_steps += 1
+        if isinstance(self.grid.get(ax, ay), Portal):
+            self.portal_steps += 1
 
         # pickup bonuses (first pickup of the target item only)
         if prev_carrying is None and self.carrying is not None:
@@ -522,12 +542,22 @@ class MiniGridFourStyles(MiniGridEnv):
                 "used_portal": self.used_portal,
                 "detection_steps": self.detection_steps,
                 "lava_steps": self.lava_steps,
+                "lava_adjacent_steps": self.lava_adjacent_steps,
+                "enemy_adjacent_steps": self.enemy_adjacent_steps,
+                "enemy_near_unprotected_steps": self.enemy_near_unprotected_steps,
+                "portal_steps": self.portal_steps,
             }
             return obs, reward, terminated, truncated, info
 
         info["detected"] = self.detected
         info["enemy_alive"] = self.enemy_alive
         info["step_count"] = self.step_count
+        info["lava_steps"] = self.lava_steps
+        info["lava_adjacent_steps"] = self.lava_adjacent_steps
+        info["enemy_adjacent_steps"] = self.enemy_adjacent_steps
+        info["enemy_near_unprotected_steps"] = self.enemy_near_unprotected_steps
+        info["detection_steps"] = self.detection_steps
+        info["portal_steps"] = self.portal_steps
         return obs, reward, terminated, truncated, info
 
 
