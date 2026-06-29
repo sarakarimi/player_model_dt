@@ -69,7 +69,8 @@ DEFAULT_OUT_DIR = os.path.join(
 )
 DEFAULT_MIN_SAMPLES = 25000      # minimum rollout rows per dataset
 DEFAULT_NUM_ENVS = 8            # parallel envs (matches the PPO training runs)
-SAMPLING_METHOD = "basic"       # sample from the policy's Categorical (as PPO did)
+SAMPLING_METHOD = "epsilon"     # policy Categorical sample, with EPSILON random noise
+EPSILON = 0.01                  # chance of a uniform random action (extra diversity)
 
 
 def out_path_for(checkpoint_path: str, out_dir: str) -> str:
@@ -200,6 +201,7 @@ def collect_one(checkpoint_path: str, out_dir: str, min_samples: int, num_envs: 
         envs=agent.envs,
         trajectory_writer=writer,
         sampling_method=SAMPLING_METHOD,
+        epsilon=EPSILON,
     )
 
     writer.tag_terminated_trajectories()
