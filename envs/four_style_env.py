@@ -206,6 +206,7 @@ class MiniGridFourStyles(MiniGridEnv):
         first_lava_bonus: float = 0.2,
         first_detection_bonus: float = 0.2,
         portal_bonus: float = 0.2,
+        exit_approach_coef: float = 0.05,
         agent_view_size: int = 3,
         **kwargs,
     ):
@@ -224,6 +225,7 @@ class MiniGridFourStyles(MiniGridEnv):
         self.first_lava_bonus = first_lava_bonus
         self.first_detection_bonus = first_detection_bonus
         self.portal_bonus = portal_bonus
+        self.exit_approach_coef = exit_approach_coef
 
         self.target_style = target_style
         self.target_bonus = target_bonus
@@ -234,7 +236,7 @@ class MiniGridFourStyles(MiniGridEnv):
         self.style_bonuses = defaults
 
         # fixed extra detection tiles below the enemy (camo-guarded gap)
-        self.extra_detection_tiles = {(9, 7), (10, 7)}
+        self.extra_detection_tiles = {} #{(9, 7), (10, 7)}
 
         # episode state
         self.enemy_pos: Optional[Tuple[int, int]] = None
@@ -243,6 +245,14 @@ class MiniGridFourStyles(MiniGridEnv):
         self.goal_pos: Tuple[int, int] = (0, 0)
         self.portal_in_pos: Tuple[int, int] = (0, 0)
         self.portal_out_pos: Tuple[int, int] = (0, 0)
+        self.weapon_pos: Tuple[int, int] = (0, 0)
+        self.camo_pos: Tuple[int, int] = (0, 0)
+        self.boots_pos: Tuple[int, int] = (0, 0)
+        self.lava_cells: list = []
+
+        # dense-shaping state (PPO feedback only; not saved to the trajectory)
+        self._shape_phase: Optional[str] = None
+        self._shape_prev_dist: Optional[float] = None
 
         self.killed_with_weapon = False
         self.traversed_detection = False
@@ -317,9 +327,9 @@ class MiniGridFourStyles(MiniGridEnv):
         for x in (6, 7, 8):
             self.put_obj(Wall(), x, 7)
             self.put_obj(Wall(), x, 8)
-        for y in range(9, 12):
-            for x in range(6, 11):
-                self.put_obj(HazardTile(), x, y)
+        self.lava_cells = [(x, y) for y in range(9, 12) for x in range(6, 11)]
+        for (x, y) in self.lava_cells:
+            self.put_obj(HazardTile(), x, y)
 
         # portal exit is fixed by the goal
         self.portal_out_pos = (11, 3)
@@ -336,6 +346,8 @@ class MiniGridFourStyles(MiniGridEnv):
         else:
             c_pos, w_pos, b_pos = (1, 3), (3, 5), (3, 6)
             self.portal_in_pos = (3, 11)
+        self.camo_pos, self.weapon_pos, self.boots_pos = c_pos, w_pos, b_pos
+        self._shape_phase, self._shape_prev_dist = None, None
         self.put_obj(Camouflage(), *c_pos)
         self.put_obj(Weapon(), *w_pos)
         self.put_obj(Boots(), *b_pos)
@@ -401,6 +413,51 @@ class MiniGridFourStyles(MiniGridEnv):
         if self.used_portal:
             return "portal"
         return None  # goal unreachable without a mechanic; no plain bypass style
+
+    def _shaping_reward(self) -> float:
+        """Dense potential-based pull toward the current sub-goal of target_style
+        (item -> use-site -> goal). Telescopes to ~0 over a trajectory. Used as
+        PPO feedback only; excluded from the saved return."""
+        coef = self.exit_approach_coef
+        ts = self.target_style
+        if not coef or ts is None:
+            return 0.0
+        wp = phase = None
+        if ts == "weapon":
+            if not self._agent_has_weapon() and not self.killed_with_weapon:
+                wp, phase = self.weapon_pos, "weapon"
+            elif self.enemy_alive and self.enemy_pos is not None:
+                wp, phase = (self.enemy_pos[0] - 1, self.enemy_pos[1]), "enemy"
+            else:
+                wp, phase = self.goal_pos, "goal"
+        elif ts == "camouflage":
+            if not self._agent_has_camouflage() and not self.traversed_detection:
+                wp, phase = self.camo_pos, "camo"
+            else:
+                wp, phase = self.goal_pos, "goal"
+        elif ts == "daredevil":
+            if not self._agent_has_boots():
+                wp, phase = self.boots_pos, "boots"
+            elif not self.traversed_lava and self.lava_cells:
+                wp = min(self.lava_cells, key=lambda c: self._manhattan(self.agent_pos, c))
+                phase = "lava"
+            elif self.agent_pos[0] < self.goal_pos[0]:
+                # post-lava: exit east into the safe x11 corridor (the direct
+                # north exit runs into the active detection zone) before climbing
+                wp, phase = (self.goal_pos[0], 9), "exit"
+            else:
+                wp, phase = self.goal_pos, "goal"
+        elif ts == "portal":
+            wp, phase = (self.portal_in_pos, "portal") if not self.used_portal else (self.goal_pos, "goal")
+        if wp is None:
+            return 0.0
+        cur = self._manhattan(self.agent_pos, wp)
+        r = 0.0
+        if self._shape_phase == phase and self._shape_prev_dist is not None:
+            r = coef * (self._shape_prev_dist - cur)
+        self._shape_prev_dist = cur
+        self._shape_phase = phase
+        return float(r)
 
     # --- Step override ---------------------------------------------------------
 
@@ -473,6 +530,13 @@ class MiniGridFourStyles(MiniGridEnv):
                     reward += self.portal_bonus
                 obs = self.gen_obs()
 
+        # dense potential-based shaping: added to the reward PPO trains on, but
+        # reported in info["shaping_reward"] so the trajectory writer subtracts
+        # it -> the SAVED return excludes shaping (real task rewards only).
+        shaping = self._shaping_reward()
+        reward += shaping
+        info["shaping_reward"] = shaping
+
         # lava
         cell = self.grid.get(*self.agent_pos)
         if isinstance(cell, HazardTile):
@@ -520,7 +584,8 @@ class MiniGridFourStyles(MiniGridEnv):
             else:
                 bonus = self.target_bonus if achieved == self.target_style else self.non_target_penalty
             base = self._reward()
-            reward = base + bonus
+            reward = base + bonus  # overwrites step reward, so no shaping here
+            info["shaping_reward"] = 0.0
             avg_dist = self.sum_distance_to_enemy / max(self.step_count, 1) if self.enemy_alive else 0.0
             info["target_style"] = self.target_style
             info["achieved_style"] = achieved
