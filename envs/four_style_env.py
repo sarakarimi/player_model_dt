@@ -167,8 +167,8 @@ class MiniGridFourStyles(MiniGridEnv):
            x: 0  1  2  3  4  5  6  7  8  9 10 11 12
      y= 0:    #  #  #  #  #  #  #  #  #  #  #  #  #
      y= 1:    #  .  .  .  .  .  d  d  d  d  d  .  #
-     y= 2:    #  .  .  .  .  .  d  d  d  d  d  .  #
-     y= 3:    #  C  .  .  .  .  d  d  d  d  d  2  #
+     y= 2:    #  .  .  .  .  .  d  d  d  d  d  2  #
+     y= 3:    #  C  .  .  .  .  d  d  d  d  d  .  #
      y= 4:    #  .  .  .  .  .  d  d  d  d  d  .  #
      y= 5:    #  .  .  W  .  .  d  d  d  d  d  .  #
      y= 6:    #  .  .  B  .  .  E  d  d  d  d  G  #
@@ -202,11 +202,15 @@ class MiniGridFourStyles(MiniGridEnv):
         lava_penalty: float = 0.0,
         pickup_bonus: float = 0.2,
         drop_penalty: float = -0.2,
+        step_penalty: float = 0, #-0.003,
+        ppo_step_cost: float = 0.0,
+        ppo_death_penalty: float = 0.3,
         kill_bonus: float = 0.2,
         first_lava_bonus: float = 0.2,
         first_detection_bonus: float = 0.2,
         portal_bonus: float = 0.2,
         exit_approach_coef: float = 0.05,
+        eval_mode: bool = False,
         agent_view_size: int = 3,
         **kwargs,
     ):
@@ -221,11 +225,22 @@ class MiniGridFourStyles(MiniGridEnv):
         self.lava_penalty = lava_penalty
         self.pickup_bonus = pickup_bonus
         self.drop_penalty = drop_penalty
+        self.step_penalty = step_penalty
+        self.ppo_step_cost = ppo_step_cost
+        self.ppo_death_penalty = ppo_death_penalty
         self.kill_bonus = kill_bonus
         self.first_lava_bonus = first_lava_bonus
         self.first_detection_bonus = first_detection_bonus
         self.portal_bonus = portal_bonus
         self.exit_approach_coef = exit_approach_coef
+        # eval_mode zeroes the PPO-only shaping so step() returns ONLY the task
+        # rewards (pickup/kill/goal/etc.) -> online-eval returns match the range
+        # of the saved offline dataset (which the writer built the same way).
+        self.eval_mode = eval_mode
+        if eval_mode:
+            self.exit_approach_coef = 0.0
+            self.ppo_step_cost = 0.0
+            self.ppo_death_penalty = 0.0
 
         self.target_style = target_style
         self.target_bonus = target_bonus
@@ -277,6 +292,9 @@ class MiniGridFourStyles(MiniGridEnv):
         self.enemy_adjacent_steps = 0
         self.enemy_near_unprotected_steps = 0
         self.portal_steps = 0
+        self.risk_exposure_steps = 0
+        self.detection_adjacent_steps = 0
+        self.post_portal_steps = 0
 
         mission_space = MissionSpace(mission_func=self._gen_mission)
         super().__init__(
@@ -311,6 +329,9 @@ class MiniGridFourStyles(MiniGridEnv):
         self.enemy_adjacent_steps = 0
         self.enemy_near_unprotected_steps = 0
         self.portal_steps = 0
+        self.risk_exposure_steps = 0
+        self.detection_adjacent_steps = 0
+        self.post_portal_steps = 0
 
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
@@ -332,7 +353,7 @@ class MiniGridFourStyles(MiniGridEnv):
             self.put_obj(HazardTile(), x, y)
 
         # portal exit is fixed by the goal
-        self.portal_out_pos = (11, 3)
+        self.portal_out_pos = (11, 2)
 
         # items: fixed cells, or random within per-item regions. The weapon and
         # camo regions match the three-style env; boots and portal-in keep their
@@ -342,7 +363,7 @@ class MiniGridFourStyles(MiniGridEnv):
             c_pos = self._rand_cell((1, 2), (2, 4), occupied)      # camo
             w_pos = self._rand_cell((3, 4), (3, 5), occupied)      # weapon
             b_pos = self._rand_cell((2, 3), (6, 7), occupied)      # boots
-            self.portal_in_pos = self._rand_cell((2, 4), (11, 11), occupied)  # portal-in, always y=11
+            self.portal_in_pos = self._rand_cell((3, 5), (11, 11), occupied)  # portal-in zone x3-5, y=11
         else:
             c_pos, w_pos, b_pos = (1, 3), (3, 5), (3, 6)
             self.portal_in_pos = (3, 11)
@@ -408,11 +429,11 @@ class MiniGridFourStyles(MiniGridEnv):
             return "weapon"
         if self.traversed_detection:
             return "camouflage"
-        if self.traversed_lava:
-            return "daredevil"
-        if self.used_portal:
-            return "portal"
-        return None  # goal unreachable without a mechanic; no plain bypass style
+        if self.traversed_lava and not self.used_portal:
+            return "daredevil"   # daredevil only counts if it did NOT use the portal
+        if self.used_portal and not self.boots_picked:
+            return "portal"      # pure portal: no boots picked (and thus no lava run)
+        return None  # mixed (boots/lava + portal) or no mechanic -> neither style
 
     def _shaping_reward(self) -> float:
         """Dense potential-based pull toward the current sub-goal of target_style
@@ -464,6 +485,7 @@ class MiniGridFourStyles(MiniGridEnv):
     def step(self, action):
         prev_carrying = self.carrying
         obs, reward, terminated, truncated, info = super().step(action)
+        reward += self.step_penalty  # per-step efficiency cost (kept in saved return)
 
         if action == 2:
             self.forward_action_count += 1
@@ -486,6 +508,19 @@ class MiniGridFourStyles(MiniGridEnv):
             self.lava_adjacent_steps += 1
         if isinstance(self.grid.get(ax, ay), Portal):
             self.portal_steps += 1
+        # risk exposure: adjacent to the active detection zone or lava while
+        # carrying no protection (no camo/boots) and the enemy is alive.
+        if (self.enemy_alive and not self._agent_has_camouflage()
+                and not self._agent_has_boots()):
+            if any(0 <= nx < self.grid.width and 0 <= ny < self.grid.height
+                   and (self.is_in_detection((nx, ny))
+                        or isinstance(self.grid.get(nx, ny), HazardTile))
+                   for nx, ny in neighbours):
+                self.risk_exposure_steps += 1
+        # raw adjacency to the active enemy detection zone (no protection gate)
+        if any(0 <= nx < self.grid.width and 0 <= ny < self.grid.height
+               and self.is_in_detection((nx, ny)) for nx, ny in neighbours):
+            self.detection_adjacent_steps += 1
 
         # pickup bonuses (first pickup of the target item only)
         if prev_carrying is None and self.carrying is not None:
@@ -533,9 +568,21 @@ class MiniGridFourStyles(MiniGridEnv):
         # dense potential-based shaping: added to the reward PPO trains on, but
         # reported in info["shaping_reward"] so the trajectory writer subtracts
         # it -> the SAVED return excludes shaping (real task rewards only).
-        shaping = self._shaping_reward()
+        # PPO-only per-step cost: folded into shaping so it pressures PPO to
+        # finish (kills the mill-at-goal) but is excluded from the SAVED return
+        # (the writer subtracts info["shaping_reward"]).
+        shaping = self._shaping_reward() - self.ppo_step_cost
         reward += shaping
         info["shaping_reward"] = shaping
+
+        # steps taken after teleporting through the portal
+        if self.used_portal:
+            self.post_portal_steps += 1
+        # per-step flags (set before any info copy so every saved step carries them)
+        info["have_weapon"] = self._agent_has_weapon()
+        info["have_camo"] = self._agent_has_camouflage()
+        info["have_boots"] = self._agent_has_boots()
+        info["passed_portal"] = self.used_portal
 
         # lava
         cell = self.grid.get(*self.agent_pos)
@@ -550,7 +597,8 @@ class MiniGridFourStyles(MiniGridEnv):
                 info = dict(info)
                 info["termination"] = "died_in_lava"
                 info["detected"] = self.detected
-                return obs, reward + self.lava_penalty, True, truncated, info
+                info["shaping_reward"] = info.get("shaping_reward", 0.0) - self.ppo_death_penalty
+                return obs, reward + self.lava_penalty - self.ppo_death_penalty, True, truncated, info
 
         # detection
         if self.is_in_detection(self.agent_pos):
@@ -564,7 +612,8 @@ class MiniGridFourStyles(MiniGridEnv):
                 info = dict(info)
                 info["termination"] = "detected"
                 info["detected"] = True
-                return obs, reward + self.detection_penalty, True, truncated, info
+                info["shaping_reward"] = info.get("shaping_reward", 0.0) - self.ppo_death_penalty
+                return obs, reward + self.detection_penalty - self.ppo_death_penalty, True, truncated, info
 
         # weapon attack
         if action == self.actions.toggle and self.enemy_alive and self.enemy_pos is not None:
@@ -611,6 +660,9 @@ class MiniGridFourStyles(MiniGridEnv):
                 "enemy_adjacent_steps": self.enemy_adjacent_steps,
                 "enemy_near_unprotected_steps": self.enemy_near_unprotected_steps,
                 "portal_steps": self.portal_steps,
+                "risk_exposure_steps": self.risk_exposure_steps,
+                "detection_adjacent_steps": self.detection_adjacent_steps,
+                "post_portal_steps": self.post_portal_steps,
             }
             return obs, reward, terminated, truncated, info
 
@@ -623,6 +675,9 @@ class MiniGridFourStyles(MiniGridEnv):
         info["enemy_near_unprotected_steps"] = self.enemy_near_unprotected_steps
         info["detection_steps"] = self.detection_steps
         info["portal_steps"] = self.portal_steps
+        info["risk_exposure_steps"] = self.risk_exposure_steps
+        info["detection_adjacent_steps"] = self.detection_adjacent_steps
+        info["post_portal_steps"] = self.post_portal_steps
         return obs, reward, terminated, truncated, info
 
 
