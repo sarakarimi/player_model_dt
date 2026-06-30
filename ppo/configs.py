@@ -19,6 +19,7 @@ from minigrid.wrappers import (
 from gymnasium import spaces
 from minigrid.wrappers import ObservationWrapper
 
+from envs.four_style_env import MiniGridFourStyles
 # from envs.multi_goal_minigrid import MultiGoalEnv
 # from envs.three_style_env import MiniGridThreeStyles
 from envs.multi_style_env import MiniGridMultiStyles
@@ -57,7 +58,8 @@ class EnvironmentConfig:
         # env = DoubleGoalEnv(mode=self.env_mode, agent_start_pos=None, agent_pov=5)
         # env = MultiGoalEnv(num_goals=8, select_id_goal=self.env_mode) #0, 1, 2, 3
         # env = MiniGridThreeStyles(render_mode=self.render_mode, target_style=self.env_mode, target_bonus=0.6, non_target_penalty=-0.1, easy_env=self.easy_env)
-        env = MiniGridMultiStyles(render_mode=self.render_mode, target_style=self.env_mode, target_bonus=1.0, non_target_penalty=-1.0, bypass_corridor=self.bypass_corridor)
+        # env = MiniGridMultiStyles(render_mode=self.render_mode, target_style=self.env_mode, target_bonus=1.0, non_target_penalty=-1.0, bypass_corridor=self.bypass_corridor)
+        env = MiniGridFourStyles(render_mode=self.render_mode, target_style=self.env_mode, target_bonus=1.0, non_target_penalty=-1.0, randomize_layout=True)
 
 
         if self.env_id.startswith("MiniGrid"):

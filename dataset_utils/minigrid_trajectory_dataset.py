@@ -108,6 +108,61 @@ def multi_style_controls_from_episode_summary(
     )
 
 
+# Marks an episode_summary as coming from MiniGridFourStyles.
+FOUR_STYLE_SUMMARY_KEYS = ("risk_exposure_steps", "portal_steps")
+
+
+def four_style_controls_from_episode_summary(
+    episode_summary,
+    risk_full: float = 6.0,
+    stealth_full: float = 5.0,
+) -> np.ndarray:
+    """
+    Build a float32 control vector from a MiniGridFourStyles episode_summary.
+
+    Dimensions: [risk_taking, stealth_exposure, commitment]
+
+    risk_taking      — steps spent ADJACENT to the active detection zone or lava
+                       while carrying no protection (no camo/boots) and the enemy
+                       is alive. Highest for portal (long x11 descent beside the
+                       detection zone), then weapon; ~0 for camo (carries camo)
+                       and daredevil (carries boots).
+    stealth_exposure — immunity from danger: steps spent IN danger protected (in
+                       the detection zone with camo, or on lava with boots). High
+                       for camo and daredevil; ~0 for weapon and portal (they
+                       never safely enter danger).
+    commitment       — path directness (forward_steps / total_steps).
+
+    Normalising constants saturate a "full" engagement near 1 and are tunable
+    from the real count distributions; controls are recomputed on load.
+    """
+    if not isinstance(episode_summary, dict):
+        episode_summary = {}
+
+    # risk: prefer the dedicated counter (steps adjacent to the active detection
+    # zone or lava, unprotected, enemy alive). For data collected before that
+    # counter existed, fall back to near-enemy-unprotected steps + portal_steps,
+    # where portal_steps stands in for "steps adjacent to the detection zone"
+    # (that is what the portal descent is, in practice). lava_adjacent_steps is
+    # intentionally NOT used: it isn't protection-aware and the only style that
+    # walks beside lava (daredevil) carries boots, so it must stay low-risk.
+    risk_exposure = episode_summary.get("risk_exposure_steps", None)
+    if risk_exposure is None:
+        risk_exposure = (int(episode_summary.get("enemy_near_unprotected_steps", 0))
+                         + int(episode_summary.get("portal_steps", 0)))
+    detection  = int(episode_summary.get("detection_steps", 0))
+    lava       = int(episode_summary.get("lava_steps",      0))
+    commitment = float(episode_summary.get("path_efficiency", 0.0))
+
+    risk_taking      = np.clip(float(risk_exposure) / risk_full, 0.0, 1.0)
+    stealth_exposure = np.clip((detection + lava) / stealth_full, 0.0, 1.0)
+
+    return np.array(
+        [risk_taking, stealth_exposure, commitment],
+        dtype=np.float32,
+    )
+
+
 class TrajectoryDataset(Dataset):
     def __init__(
             self,
@@ -228,6 +283,10 @@ class TrajectoryDataset(Dataset):
         # both envs keep working without any change to the training scripts.
         def _controls_for(ep_info):
             summary = ep_info.get("episode_summary") if isinstance(ep_info, dict) else None
+            if isinstance(summary, dict) and any(
+                k in summary for k in FOUR_STYLE_SUMMARY_KEYS
+            ):
+                return four_style_controls_from_episode_summary(summary)
             if isinstance(summary, dict) and any(
                 k in summary for k in MULTI_STYLE_SUMMARY_KEYS
             ):
@@ -356,31 +415,30 @@ class TrajectoryDataset(Dataset):
         timesteps = [torch.arange(len(s)) for s in states]
 
         # Sampling trajectories based on their lengths and returns
-        print(len(observations))
-        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
-        print(top_seq_lengths)
-        seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
+        # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
+        # print(top_seq_lengths)
+        # seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
         # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
         # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
         # print(len(states))
-        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
-        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
-        # index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
+        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
+        print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
 
         if self.select_highest_count_return_group:  # TEMPORARY TEST
             indexes = self.get_highest_count_return_group(
                 states, returns, num_samples=self.highest_count_num_samples,
                 top_k=self.highest_count_top_k)
         elif self.sampling:  # Use random sampled trajectories
-            index_lists = []
-            for seq_len in seq_lens:
-                index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
-                              len(state) == seq_len]
-                index_lists.extend(index_list)
+            # index_lists = []
+            # for seq_len in seq_lens:
+            #     index_list = [index for index, (state, ret) in enumerate(zip(states, returns)) if
+            #                   len(state) == seq_len]
+            #     index_lists.extend(index_list)
             indexes = random.sample(index_lists, num_samples)
         else:  # Use non-random trajectories
-            indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
-            # indexes = index_lists[-num_samples:]
+            # indexes = [index for index, (state, ret) in enumerate(zip(states, returns)) if len(state) in seq_lens][-num_samples:]
+            indexes = index_lists[-num_samples:]
 
         print(len(indexes))
         states = [states[idx] for idx in indexes]
@@ -392,11 +450,11 @@ class TrajectoryDataset(Dataset):
         timesteps = [timesteps[idx] for idx in indexes]
         terminal_infos = [raw_terminal_infos[idx] for idx in indexes]
 
-        top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=20)
-        print(top_seq_lengths)
+        # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=20)
+        # print(top_seq_lengths)
         # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
-        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.3)
-        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
+        print(sum([count for (len, ret, count, idx) in top_seq_lengths]))
 
 
         return (states, actions, rewards, dones, truncated, returns,

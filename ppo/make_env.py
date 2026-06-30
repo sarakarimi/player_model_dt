@@ -3,6 +3,7 @@ from minigrid.minigrid_env import MiniGridEnv
 from minigrid.wrappers import FullyObsWrapper, OneHotPartialObsWrapper, ViewSizeWrapper
 import numpy as np
 
+from envs.four_style_env import MiniGridFourStyles
 from envs.multi_style_env import MiniGridMultiStyles
 # from envs.three_style_env import MiniGridThreeStyles
 from configs import EnvironmentConfig
@@ -30,7 +31,8 @@ def make_env(config: EnvironmentConfig, seed: int, idx: int, run_name: str, mode
         # env = MultiGoalEnv(num_goals=8, select_id_goal=mode, **kwargs) #0, 1, 2, 3
         # env = metal_grid_env()
         # env = MiniGridThreeStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, randomize_layout=True, easy_env=easy_env, **kwargs)
-        env = MiniGridMultiStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, free_item_placement=True, bypass_corridor=config.bypass_corridor, **kwargs)
+        # env = MiniGridMultiStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, free_item_placement=True, bypass_corridor=config.bypass_corridor, **kwargs)
+        env = MiniGridFourStyles(target_style=mode, target_bonus=1.0, non_target_penalty=-1.0, randomize_layout=True, **kwargs)
 
 
         env = gym.wrappers.RecordEpisodeStatistics(env)

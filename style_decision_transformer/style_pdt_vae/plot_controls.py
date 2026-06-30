@@ -41,7 +41,7 @@ CONTROL_NAMES = [
     "risk_taking", "stealth_exposure", "route_directness"
 ]
 # STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+STYLE_NAMES = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 
 # STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}  # blue, orange, green
 STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#000000"}  # blue, orange, green, black

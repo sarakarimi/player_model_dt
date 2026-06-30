@@ -77,10 +77,13 @@ from style_decision_transformer.style_pdt_vae.sorl import (
 )
 from envs.three_style_env import MiniGridThreeStyles
 from envs.multi_style_env import MiniGridMultiStyles
+from envs.four_style_env import MiniGridFourStyles
 from dataset_utils.minigrid_trajectory_dataset import (
     controls_from_episode_summary,
     multi_style_controls_from_episode_summary,
+    four_style_controls_from_episode_summary,
     MULTI_STYLE_SUMMARY_KEYS,
+    FOUR_STYLE_SUMMARY_KEYS,
 )
 
 
@@ -88,16 +91,20 @@ from dataset_utils.minigrid_trajectory_dataset import (
 # Constants
 # ---------------------------------------------------------------------------
 
-# Switch between the 3-style env (envs/three_style_env.py) and the 4-style
-# multi-style env (envs/multi_style_env.py, adds the "daredevil" lava style).
-# Must match the dataset referenced by paths.py: the multi-style datasets carry
-# task labels 0..3, so MULTI_STYLE must be True when evaluating on them.
-MULTI_STYLE = True
+# Select which env / style set to evaluate on. Must match the dataset
+# referenced by paths.py (task labels):
+#   "four"  -> envs/four_style_env.py    (portal / weapon / camouflage / daredevil)
+#   "multi" -> envs/multi_style_env.py   (bypass / weapon / camouflage / daredevil)
+#   "three" -> envs/three_style_env.py   (bypass / weapon / camouflage)
+ENV_KIND = "four"
 
-if MULTI_STYLE:
+if ENV_KIND == "four":
+    STYLE_NAMES  = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+    STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#C44E52"}
+elif ENV_KIND == "multi":
     STYLE_NAMES  = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
     STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#000000"}
-else:
+else:  # "three"
     STYLE_NAMES  = {0: "bypass", 1: "weapon", 2: "camouflage"}
     STYLE_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868"}
 
@@ -105,11 +112,20 @@ else:
 def make_eval_env(style_name: str, env_kwargs: dict):
     """Construct the evaluation env for one target style.
 
-    Picks the multi-style env (with daredevil + lava) or the three-style env
-    based on MULTI_STYLE, mirroring the switch in
-    pdt_vae_with_prior.evaluate_online_controls.
+    Picks the four-style, multi-style, or three-style env based on ENV_KIND,
+    mirroring the switch in pdt_vae_with_prior.evaluate_online_controls.
     """
-    if MULTI_STYLE:
+    if ENV_KIND == "four":
+        return MiniGridFourStyles(
+            target_style=style_name,
+            target_bonus=1.0,
+            non_target_penalty=-1.0,
+            agent_view_size=3,
+            randomize_layout=True,
+            eval_mode=True,
+            **env_kwargs,
+        )
+    if ENV_KIND == "multi":
         return MiniGridMultiStyles(
             target_style=style_name,
             target_bonus=1.0,
@@ -155,7 +171,15 @@ MAX_ENEMY_DIST = 12.0
 # eval_generalization.py imports them. CONTROL_NAMES_ACTIVE is what this module's
 # tables, plots, and fidelity computation use for the env selected by MULTI_STYLE.
 MULTI_CONTROL_NAMES = ["risk_taking", "stealth_exposure", "confrontation"]
-CONTROL_NAMES_ACTIVE = MULTI_CONTROL_NAMES if MULTI_STYLE else CONTROL_NAMES
+# Four-style controls (four_style_controls_from_episode_summary):
+#   [risk_taking, stealth_exposure, commitment]
+FOUR_CONTROL_NAMES = ["risk_taking", "stealth_exposure", "commitment"]
+if ENV_KIND == "four":
+    CONTROL_NAMES_ACTIVE = FOUR_CONTROL_NAMES
+elif ENV_KIND == "multi":
+    CONTROL_NAMES_ACTIVE = MULTI_CONTROL_NAMES
+else:
+    CONTROL_NAMES_ACTIVE = CONTROL_NAMES
 
 
 def achieved_control_from_summary(episode_summary):
@@ -169,6 +193,8 @@ def achieved_control_from_summary(episode_summary):
     """
     if not isinstance(episode_summary, dict):
         return None
+    if any(k in episode_summary for k in FOUR_STYLE_SUMMARY_KEYS):
+        return four_style_controls_from_episode_summary(episode_summary)
     if any(k in episode_summary for k in MULTI_STYLE_SUMMARY_KEYS):
         return multi_style_controls_from_episode_summary(episode_summary)
     return controls_from_episode_summary(episode_summary)

@@ -696,7 +696,7 @@ if __name__ == "__main__":
     register_env()
     env = gym.make(
         "MiniGrid-FourStyles-v0",
-        target_style="portal",
+        target_style=None, #"portal",
         target_bonus=1.0,
         non_target_penalty=-1.0,
         render_mode="human",

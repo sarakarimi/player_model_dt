@@ -1,0 +1,1132 @@
+{
+  "style_combinations": {
+    "StyleDT": {
+      "weapon_x_camouflage": {
+        "100% weapon\n0% camo": {
+          "intended_control": [
+            0.7466640472412109,
+            0.0,
+            0.5268269181251526
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% weapon\n40% camo": {
+          "intended_control": [
+            0.44853177666664124,
+            0.4000000059604645,
+            0.6134012937545776
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% weapon\n60% camo": {
+          "intended_control": [
+            0.2994656264781952,
+            0.6000000238418579,
+            0.6566885113716125
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% weapon\n100% camo": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "weapon_x_portal": {
+        "100% weapon\n0% portal": {
+          "intended_control": [
+            0.7466640472412109,
+            0.0,
+            0.5268269181251526
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% weapon\n40% portal": {
+          "intended_control": [
+            0.7557319402694702,
+            0.0,
+            0.6311779022216797
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% weapon\n60% portal": {
+          "intended_control": [
+            0.7602659463882446,
+            0.0,
+            0.6833533644676208
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% weapon\n100% portal": {
+          "intended_control": [
+            0.7693338394165039,
+            0.0,
+            0.7877042889595032
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "portal_x_camouflage": {
+        "100% portal\n0% camo": {
+          "intended_control": [
+            0.7693338394165039,
+            0.0,
+            0.7877042889595032
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% portal\n40% camo": {
+          "intended_control": [
+            0.4621336758136749,
+            0.4000000059604645,
+            0.7699277400970459
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% portal\n60% camo": {
+          "intended_control": [
+            0.30853354930877686,
+            0.6000000238418579,
+            0.7610394954681396
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% portal\n100% camo": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "camouflage_x_daredevil": {
+        "100% camo\n0% daredevil": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% camo\n40% daredevil": {
+          "intended_control": [
+            0.00139999995008111,
+            1.0,
+            0.7025500535964966
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% camo\n60% daredevil": {
+          "intended_control": [
+            0.00143333338201046,
+            1.0,
+            0.6821936368942261
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% camo\n100% daredevil": {
+          "intended_control": [
+            0.001500000013038516,
+            1.0,
+            0.6414808034896851
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      }
+    },
+    "ControlDT": {
+      "weapon_x_camouflage": {
+        "100% weapon\n0% camo": {
+          "intended_control": [
+            0.7466640472412109,
+            0.0,
+            0.5268269181251526
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% weapon\n40% camo": {
+          "intended_control": [
+            0.44853177666664124,
+            0.4000000059604645,
+            0.6134012937545776
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% weapon\n60% camo": {
+          "intended_control": [
+            0.2994656264781952,
+            0.6000000238418579,
+            0.6566885113716125
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% weapon\n100% camo": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "weapon_x_portal": {
+        "100% weapon\n0% portal": {
+          "intended_control": [
+            0.7466640472412109,
+            0.0,
+            0.5268269181251526
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% weapon\n40% portal": {
+          "intended_control": [
+            0.7557319402694702,
+            0.0,
+            0.6311779022216797
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% weapon\n60% portal": {
+          "intended_control": [
+            0.7602659463882446,
+            0.0,
+            0.6833533644676208
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% weapon\n100% portal": {
+          "intended_control": [
+            0.7693338394165039,
+            0.0,
+            0.7877042889595032
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "portal_x_camouflage": {
+        "100% portal\n0% camo": {
+          "intended_control": [
+            0.7693338394165039,
+            0.0,
+            0.7877042889595032
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% portal\n40% camo": {
+          "intended_control": [
+            0.4621336758136749,
+            0.4000000059604645,
+            0.7699277400970459
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% portal\n60% camo": {
+          "intended_control": [
+            0.30853354930877686,
+            0.6000000238418579,
+            0.7610394954681396
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% portal\n100% camo": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      },
+      "camouflage_x_daredevil": {
+        "100% camo\n0% daredevil": {
+          "intended_control": [
+            0.001333333202637732,
+            1.0,
+            0.7432628870010376
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "60% camo\n40% daredevil": {
+          "intended_control": [
+            0.00139999995008111,
+            1.0,
+            0.7025500535964966
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "40% camo\n60% daredevil": {
+          "intended_control": [
+            0.00143333338201046,
+            1.0,
+            0.6821936368942261
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        },
+        "0% camo\n100% daredevil": {
+          "intended_control": [
+            0.001500000013038516,
+            1.0,
+            0.6414808034896851
+          ],
+          "performance": {
+            "n_episodes": 5,
+            "success_rate": 0.0,
+            "avg_return": 0.0,
+            "avg_episode_length": 100.0,
+            "detection_rate": 0.0,
+            "avg_enemy_distance": NaN,
+            "avg_path_efficiency": NaN,
+            "weapon_usage_rate": NaN,
+            "camouflage_usage_rate": NaN,
+            "style_distribution": {
+              "portal": 0.0,
+              "weapon": 0.0,
+              "camouflage": 0.0,
+              "daredevil": 0.0,
+              "unknown": 1.0
+            },
+            "style_entropy": -0.0
+          },
+          "adherence": {
+            "mean_abs_spearman_r": NaN
+          }
+        }
+      }
+    }
+  },
+  "ood": {
+    "StyleDT": {
+      "weapon_x_camouflage": {
+        "intended_control": [
+          0.8199999928474426,
+          0.5400000214576721,
+          0.6700000166893005
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      },
+      "camouflage_x_bypass": {
+        "intended_control": [
+          0.6700000166893005,
+          0.1899999976158142,
+          0.7900000214576721
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      },
+      "weapon_x_bypass": {
+        "intended_control": [
+          0.9200000166893005,
+          0.029999999329447746,
+          0.3799999952316284
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      }
+    },
+    "ControlDT": {
+      "weapon_x_camouflage": {
+        "intended_control": [
+          0.8199999928474426,
+          0.5400000214576721,
+          0.6700000166893005
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      },
+      "camouflage_x_bypass": {
+        "intended_control": [
+          0.6700000166893005,
+          0.1899999976158142,
+          0.7900000214576721
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      },
+      "weapon_x_bypass": {
+        "intended_control": [
+          0.9200000166893005,
+          0.029999999329447746,
+          0.3799999952316284
+        ],
+        "performance": {
+          "n_episodes": 5,
+          "success_rate": 0.0,
+          "avg_return": 0.0,
+          "avg_episode_length": 100.0,
+          "detection_rate": 0.0,
+          "avg_enemy_distance": NaN,
+          "avg_path_efficiency": NaN,
+          "weapon_usage_rate": NaN,
+          "camouflage_usage_rate": NaN,
+          "style_distribution": {
+            "portal": 0.0,
+            "weapon": 0.0,
+            "camouflage": 0.0,
+            "daredevil": 0.0,
+            "unknown": 1.0
+          },
+          "style_entropy": -0.0
+        },
+        "adherence": {
+          "mean_abs_spearman_r": NaN
+        }
+      }
+    }
+  }
+}

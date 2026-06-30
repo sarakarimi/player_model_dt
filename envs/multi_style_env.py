@@ -1113,7 +1113,7 @@ if __name__ == "__main__":
         bypass_corridor=None,
         show_detection_zones=True,
         free_item_placement=True,
-        agent_view_size=7,
+        agent_view_size=3,
     )
 
     obs, _ = env.reset()
@@ -1163,6 +1163,7 @@ if __name__ == "__main__":
                 if action is not None:
                     obs, reward, done, truncated, info = env.step(action)
                     ret += reward
+                    print(obs)
                     print(f"info: {info}")
                     print(f"step reward: {reward:.3f}   episode return: {ret:.3f}")
                     if done or truncated:

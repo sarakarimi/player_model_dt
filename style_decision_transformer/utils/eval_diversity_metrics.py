@@ -42,6 +42,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, REPO_ROOT)
 
 from envs.multi_style_env import MiniGridMultiStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
     MiniGridDataset,
@@ -55,17 +56,23 @@ from style_decision_transformer.style_pdt_vae.control_prompt_pdt import (
 HERE = os.path.dirname(__file__)
 DEVICE = "cpu"
 
+# Four-style ordering (must match paths.py / dataset task ids).
+STYLE_ORDER = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+
+# Keys are correct at import time (so --styles default works); the placeholder
+# vectors are overwritten with per-style dataset means inside main() once the
+# dataset is loaded.
 CANONICAL = {
-    "bypass":     np.array([0.0, 1.0, 0.0], dtype=np.float32),
-    "weapon":     np.array([0.79, 0.16, 0.79], dtype=np.float32),
-    "camouflage": np.array([0.39, 0.68, 0.34], dtype=np.float32),
-    "daredevil":  np.array([1.0, 0.12, 0.18], dtype=np.float32),
+    "portal":     np.array([0.70, 0.00, 0.70], dtype=np.float32),
+    "weapon":     np.array([0.80, 0.00, 0.50], dtype=np.float32),
+    "camouflage": np.array([0.20, 1.00, 0.75], dtype=np.float32),
+    "daredevil":  np.array([0.15, 1.00, 0.67], dtype=np.float32),
 }
 
-GRID_SIZE   = 17
+GRID_SIZE   = 11
 CENTER_ROW  = (GRID_SIZE - 1) / 2.0   # 8.0
-INITIAL_RTG = 1.0
-MAX_EP_LEN  = 130
+INITIAL_RTG = 2.5
+MAX_EP_LEN  = 100
 DTW_MAX_PTS = 64                      # subsample long paths before DTW
 
 
@@ -132,10 +139,10 @@ def route_entropy(paths):
 # --------------------------------------------------------------------------- #
 
 def make_env(seed):
-    env = MiniGridMultiStyles(
+    env = MiniGridFourStyles(
         target_style=None, target_bonus=1.0, non_target_penalty=-1.0,
-        agent_view_size=3, free_item_placement=True, max_steps=MAX_EP_LEN,
-        render_mode="rgb_array",
+        agent_view_size=3, randomize_layout=True, eval_mode=True,
+        max_steps=MAX_EP_LEN, render_mode="rgb_array",
     )
     env.reset(seed=seed)
     return env
@@ -408,6 +415,15 @@ def main():
         max_len=20, control_dim=CONTROL_DIM,
     )
     state_mean, state_std = dataset.state_mean, dataset.state_std
+
+    # Overwrite CANONICAL placeholders with per-style dataset means so the
+    # conditioning is data-accurate (keys stay the four-style names).
+    ctrl_arr = np.asarray(dataset.controls)
+    task_arr = np.asarray(dataset.tasks)
+    for sid, sname in STYLE_ORDER.items():
+        mask = task_arr == sid
+        if mask.any():
+            CANONICAL[sname] = ctrl_arr[mask].mean(axis=0).astype(np.float32)
 
     models, ctx = load_models()
     seeds = [args.base_seed + i for i in range(args.n_seeds)]

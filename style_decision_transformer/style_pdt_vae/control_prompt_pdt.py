@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
@@ -48,7 +49,7 @@ CONTROL_NAMES = ["risk_taking", "stealth_exposure", "route_directness"] #, "stea
 CONTROL_DIM   = len(CONTROL_NAMES)
 
 # STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+STYLE_NAMES = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 
 
@@ -363,7 +364,7 @@ def evaluate_online_control(
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
     eval_device:            str   = "cpu",
-    initial_rtg:            float = 3.2,
+    initial_rtg:            float = 2.5,
     env_kwargs:             dict  = None,
 ):
     """
@@ -377,7 +378,7 @@ def evaluate_online_control(
     eval_model.eval()
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 130
+        env_kwargs["max_steps"] = 100
 
     # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
     # Fallback when dataset has no controls stored (should not happen with new datasets).
@@ -413,7 +414,17 @@ def evaluate_online_control(
 
 
             for ep in range(num_episodes_per_style):
-                if len(STYLE_NAMES) == 3:
+                if "portal" in STYLE_NAMES.values():
+                    env = MiniGridFourStyles(
+                        target_style=STYLE_NAMES[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                elif len(STYLE_NAMES) == 3:
                     env = MiniGridThreeStyles(
                         target_style=STYLE_NAMES[style_id],
                         target_bonus=1.0,
@@ -574,7 +585,7 @@ def train_control_dt(
     eval_every:              int   = 10,
     eval_episodes_per_style: int   = 50,
     max_ep_len:              int   = 100,
-    initial_rtg:             float = 3.2,
+    initial_rtg:             float = 2.5,
 ):
     model.to(device)
     model.train()
@@ -698,7 +709,7 @@ if __name__ == "__main__":
         hidden_size=128,
         control_dim=CONTROL_DIM,
         max_length=max_len,
-        max_ep_len=130,
+        max_ep_len=100,
         action_tanh=False,
         n_layer=4,
         n_head=8,

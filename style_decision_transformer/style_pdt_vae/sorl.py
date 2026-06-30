@@ -29,6 +29,7 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 
 
@@ -36,8 +37,8 @@ from style_decision_transformer.style_pdt_vae.paths import paths
 # Constants
 # ---------------------------------------------------------------------------
 
-NUM_STYLES  = 3
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
+STYLE_NAMES = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
+NUM_STYLES  = len(STYLE_NAMES)  # = 4 for the four-style env
 
 
 # =============================================================================
@@ -567,15 +568,26 @@ def evaluate_sorl(
 
         with torch.no_grad():
             for ep in range(num_episodes_per_style):
-                env = MiniGridThreeStyles(
-                    target_style=STYLE_NAMES[env_style_id],
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    randomize_layout=True,
-                    **env_kwargs,
-                )
+                if "portal" in STYLE_NAMES.values():
+                    env = MiniGridFourStyles(
+                        target_style=STYLE_NAMES[env_style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                else:
+                    env = MiniGridThreeStyles(
+                        target_style=STYLE_NAMES[env_style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        easy_env=False,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        **env_kwargs,
+                    )
                 obs, _ = env.reset(seed=42 + ep)
 
                 episode_return = 0.0

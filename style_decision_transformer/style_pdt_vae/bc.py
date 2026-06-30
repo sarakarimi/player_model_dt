@@ -26,11 +26,12 @@ from torch.utils.data import Dataset, DataLoader
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 
 
 # STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"} # three style env
-STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+STYLE_NAMES = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 
 # =============================================================================
@@ -322,7 +323,17 @@ def evaluate_bc_oracle(
 
         with torch.no_grad():
             for ep in range(num_episodes_per_style):
-                if len(STYLE_NAMES) == 3:
+                if "portal" in STYLE_NAMES.values():
+                    env = MiniGridFourStyles(
+                        target_style=STYLE_NAMES[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                elif len(STYLE_NAMES) == 3:
                     env = MiniGridThreeStyles(
                         target_style=STYLE_NAMES[style_id],
                         target_bonus=1.0,
@@ -447,7 +458,7 @@ if __name__ == "__main__":
     results, success = evaluate_bc_oracle(
         policies=policies,
         num_episodes_per_style=50,
-        max_ep_len=130,
+        max_ep_len=100,
         eval_device=device,
     )
     plot_eval_results(results, success)

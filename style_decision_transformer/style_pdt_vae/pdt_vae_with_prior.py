@@ -12,12 +12,13 @@ from torch.utils.data import DataLoader
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 from style_decision_transformer.utils.utils import cluster_latents, plot_embeddings
 from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
 # style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
-style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+style_names = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 
 # =============================================================================
@@ -515,7 +516,7 @@ def train_style_prompt_dt(
     eval_every: int = 10,
     eval_episodes_per_style: int = 50,
     max_ep_len: int = 100,
-    initial_rtg: float = 3.2,
+    initial_rtg: float = 2.5,
     beta_warmup_epochs: int = 0,
 ):
     model.to(device)
@@ -664,7 +665,7 @@ def evaluate_online_controls(
     num_episodes_per_style: int = 10,
     max_ep_len: int = 100,
     device: str = "cpu",
-    initial_rtg: float = 3.2,
+    initial_rtg: float = 2.5,
     env_kwargs: dict = None,
     deterministic_prior: bool = True,
     max_context: int = None,
@@ -688,7 +689,7 @@ def evaluate_online_controls(
         max_context = model.dt.max_length
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 130
+        env_kwargs["max_steps"] = 100
 
     # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
     # Fallback when dataset has no controls stored (should not happen with new datasets).
@@ -730,7 +731,17 @@ def evaluate_online_controls(
 
             # rollout episodes
             for ep in range(num_episodes_per_style):
-                if len(style_names) == 3:
+                if "portal" in style_names.values():
+                    env = MiniGridFourStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                elif len(style_names) == 3:
                     env = MiniGridThreeStyles(
                         target_style=style_names[style_id],
                         target_bonus=1.0,
@@ -922,7 +933,7 @@ if __name__ == "__main__":
 
     # The timestep embedding (embed_timestep) is sized by max_ep_len and is NOT
     # clamped, so it must cover the longest trajectory in the data. Newer data
-    # collected with max_steps=130 has trajectories up to ~128 steps, which
+    # collected with max_steps=100 has trajectories up to ~128 steps, which
     # overflowed the old hard-coded 100. Derive it from the data (+buffer) so it
     # auto-adjusts if max_steps changes again.
     model_max_ep_len = dataset.max_ep_len + 1
@@ -947,7 +958,7 @@ if __name__ == "__main__":
     train_style_prompt_dt(
         model=model,
         dataloader=loader,
-        num_epochs=100,
+        num_epochs=200,
         device=device,
         lr=1e-3,
         grad_clip=1.0,

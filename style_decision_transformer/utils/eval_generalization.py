@@ -44,6 +44,11 @@ from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
     StyleVAEPromptDT,
 )
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
+from dataset_utils.minigrid_trajectory_dataset import (
+    four_style_controls_from_episode_summary,
+    FOUR_STYLE_SUMMARY_KEYS,
+)
 from scipy.stats import spearmanr
 
 
@@ -64,10 +69,11 @@ SEEDS   = [0, 1, 2, 3, 4]
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Canonical style means from training data (mean of per-trajectory controls)
-#   bypass:     risk=0.67  resource=0.03  commitment=0.81
-#   weapon:     risk=0.92  resource=0.55  commitment=0.58
-#   camouflage: risk=0.67  resource=0.53  commitment=0.77
+# Four-style ordering (must match paths.py / dataset task ids).
+# Canonical per-style control vectors are derived from the dataset means at
+# runtime (canonical_controls_from_dataset); the four interpolation combos are
+# then built from those vectors in build_style_combinations(). Control dims are
+# [risk_taking, stealth_exposure, commitment].
 #
 # Each combination has 4 steps linearly interpolated between the two styles:
 #   step 0 → 100% A /   0% B   (pure A, used as in-distribution anchor)
@@ -76,34 +82,69 @@ SEEDS   = [0, 1, 2, 3, 4]
 #   step 3 →   0% A / 100% B   (pure B, used as in-distribution anchor)
 # ---------------------------------------------------------------------------
 
-_B  = np.array([0.670, 0.030, 0.810], dtype=np.float32)   # bypass
-_W  = np.array([0.920, 0.550, 0.580], dtype=np.float32)   # weapon
-_C  = np.array([0.670, 0.530, 0.770], dtype=np.float32)   # camouflage
+STYLE_ORDER = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+
+# Fallback canonical vectors if a style is absent from the dataset.
+_FALLBACK_CANONICAL = {
+    "portal":     np.array([0.70, 0.00, 0.70], dtype=np.float32),
+    "weapon":     np.array([0.80, 0.00, 0.50], dtype=np.float32),
+    "camouflage": np.array([0.20, 1.00, 0.75], dtype=np.float32),
+    "daredevil":  np.array([0.15, 1.00, 0.67], dtype=np.float32),
+}
+
 
 def _lerp(a, b, t):
     return ((1 - t) * a + t * b).astype(np.float32)
 
-# {combo_name: [(step_label, control_vector), ...]}
-STYLE_COMBINATIONS: Dict[str, list] = {
-    "bypass_x_camouflage": [
-        ("100% bypass\n0% camo",   _lerp(_B, _C, 0.0)),
-        ("60% bypass\n40% camo",   _lerp(_B, _C, 0.4)),
-        ("40% bypass\n60% camo",   _lerp(_B, _C, 0.5)),
-        ("0% bypass\n100% camo",   _lerp(_B, _C, 1.0)),
-    ],
-    "weapon_x_camouflage": [
-        ("100% weapon\n0% camo",   _lerp(_W, _C, 0.0)),
-        ("60% weapon\n40% camo",   _lerp(_W, _C, 0.35)),
-        ("40% weapon\n60% camo",   _lerp(_W, _C, 0.46)),
-        ("0% weapon\n100% camo",   _lerp(_W, _C, 1.0)),
-    ],
-    "weapon_x_bypass": [
-        ("100% weapon\n0% bypass", _lerp(_W, _B, 0.0)),
-        ("60% weapon\n40% bypass", _lerp(_W, _B, 0.3)),
-        ("40% weapon\n60% bypass", _lerp(_W, _B, 0.7)),
-        ("0% weapon\n100% bypass", _lerp(_W, _B, 1.0)),
-    ],
-}
+
+def canonical_controls_from_dataset(dataset) -> Dict[str, np.ndarray]:
+    """Per-style canonical control vector = mean of that style's dataset controls."""
+    ctrl_arr = np.asarray(dataset.controls)
+    task_arr = np.asarray(dataset.tasks)
+    canonical: Dict[str, np.ndarray] = {}
+    for sid, sname in STYLE_ORDER.items():
+        mask = task_arr == sid
+        if mask.any():
+            canonical[sname] = ctrl_arr[mask].mean(axis=0).astype(np.float32)
+        else:
+            canonical[sname] = _FALLBACK_CANONICAL[sname].copy()
+    return canonical
+
+
+def build_style_combinations(dataset) -> Dict[str, list]:
+    """Build the four-style interpolation combos from dataset-derived endpoints.
+
+    Returns {combo_name: [(step_label, control_vector), ...]} with 4 steps each
+    (100/0, 60/40, 40/60, 0/100).
+    """
+    c = canonical_controls_from_dataset(dataset)
+    _P, _W, _C, _D = c["portal"], c["weapon"], c["camouflage"], c["daredevil"]
+    return {
+        "weapon_x_camouflage": [
+            ("100% weapon\n0% camo",       _lerp(_W, _C, 0.0)),
+            ("60% weapon\n40% camo",       _lerp(_W, _C, 0.4)),
+            ("40% weapon\n60% camo",       _lerp(_W, _C, 0.6)),
+            ("0% weapon\n100% camo",       _lerp(_W, _C, 1.0)),
+        ],
+        "weapon_x_portal": [
+            ("100% weapon\n0% portal",     _lerp(_W, _P, 0.0)),
+            ("60% weapon\n40% portal",     _lerp(_W, _P, 0.4)),
+            ("40% weapon\n60% portal",     _lerp(_W, _P, 0.6)),
+            ("0% weapon\n100% portal",     _lerp(_W, _P, 1.0)),
+        ],
+        "portal_x_camouflage": [
+            ("100% portal\n0% camo",       _lerp(_P, _C, 0.0)),
+            ("60% portal\n40% camo",       _lerp(_P, _C, 0.4)),
+            ("40% portal\n60% camo",       _lerp(_P, _C, 0.6)),
+            ("0% portal\n100% camo",       _lerp(_P, _C, 1.0)),
+        ],
+        "camouflage_x_daredevil": [
+            ("100% camo\n0% daredevil",    _lerp(_C, _D, 0.0)),
+            ("60% camo\n40% daredevil",    _lerp(_C, _D, 0.4)),
+            ("40% camo\n60% daredevil",    _lerp(_C, _D, 0.6)),
+            ("0% camo\n100% daredevil",    _lerp(_C, _D, 1.0)),
+        ],
+    }
 
 OOD_CONTROLS: Dict[str, np.ndarray] = {
     # --- paste your out-of-distribution vectors here ---
@@ -192,13 +233,13 @@ def _run_episodes_with_control(
 
     with torch.no_grad():
         for ep in range(num_episodes):
-            env = MiniGridThreeStyles(
+            env = MiniGridFourStyles(
                 target_style=None,   # no target — purely measure emergent behaviour
                 target_bonus=0.0,
                 non_target_penalty=0.0,
-                easy_env=False,
                 agent_view_size=3,
                 randomize_layout=True,
+                eval_mode=True,
                 # render_mode="human",
             )
             outcome = _rollout_episode(
@@ -218,8 +259,13 @@ def _run_episodes_with_control(
     return records
 
 
-STYLE_LABELS   = ["bypass", "weapon", "camouflage"]
-STYLE_COLORS   = {"bypass": "#4C72B0", "weapon": "#DD8452", "camouflage": "#55A868"}
+STYLE_LABELS   = ["portal", "weapon", "camouflage", "daredevil"]
+STYLE_COLORS   = {
+    "portal":     "#4C72B0",
+    "weapon":     "#DD8452",
+    "camouflage": "#55A868",
+    "daredevil":  "#C44E52",
+}
 UNKNOWN_COLOR  = "#999999"
 
 
@@ -262,7 +308,31 @@ def _aggregate_records(records: List[EpisodeRecord]) -> dict:
 
 
 def _control_adherence(records: List[EpisodeRecord]) -> dict:
-    """Spearman r between each control dim and its corresponding outcome."""
+    """Spearman r between each intended control dim and the achieved outcome.
+
+    For the four-style env the achieved control vector is recomputed from the
+    rollout episode_summary with four_style_controls_from_episode_summary (via
+    EpisodeRecord.achieved_control, set in _rollout_episode), so intended and
+    achieved live in the same [risk_taking, stealth_exposure, commitment] space
+    and dim i lines up with dim i. Falls back to the three-style outcome mapping
+    when no achieved_control is available.
+    """
+    four_suc = [r for r in records
+                if r.success
+                and r.control_vector is not None
+                and r.achieved_control is not None]
+    if len(four_suc) >= 3:
+        rs = {}
+        for dim_idx, dim_name in enumerate(CONTROL_NAMES):
+            ctrl_vals = np.array([r.control_vector[dim_idx]   for r in four_suc])
+            ach_vals  = np.array([r.achieved_control[dim_idx] for r in four_suc])
+            r_val, p_val = spearmanr(ctrl_vals, ach_vals)
+            rs[dim_name] = {"spearman_r": float(r_val), "p_value": float(p_val)}
+        rs["mean_abs_spearman_r"] = float(
+            np.mean([abs(v["spearman_r"]) for v in rs.values() if isinstance(v, dict)])
+        )
+        return rs
+
     suc = [r for r in records
            if r.success
            and r.control_vector is not None
@@ -632,6 +702,10 @@ if __name__ == "__main__":
     print("Loading dataset …")
     dataset = MiniGridDataset(trajectory_paths=paths, **dataset_params)
 
+    # Build the four-style interpolation combos from dataset-derived canonical
+    # vectors (per-style means of the dataset controls).
+    style_combinations = build_style_combinations(dataset)
+
     # ------------------------------------------------------------------
     # Load models
     # ------------------------------------------------------------------
@@ -677,7 +751,7 @@ if __name__ == "__main__":
         # --- style-interpolation combinations ---
         print("-- Style-combination transitions --")
         combo_results[model_name] = evaluate_style_combinations(
-            STYLE_COMBINATIONS, model_name, vae, ctrl, dataset,
+            style_combinations, model_name, vae, ctrl, dataset,
         )
         for combo_name, step_dict in combo_results[model_name].items():
             print_generalization_table(step_dict, model_name, combo_name)

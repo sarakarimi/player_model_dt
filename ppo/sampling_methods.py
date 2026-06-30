@@ -11,7 +11,18 @@ These include:
 - topK Sampling
 - bottomK Sampling
 """
+import torch
 from torch.distributions.categorical import Categorical
+
+
+def epsilon_sample(probs: Categorical, epsilon: float = 0.01):
+    """Basic sampling, but with probability `epsilon` pick a uniform random
+    action instead. Adds exploration noise to demonstration collection."""
+    base = probs.sample()
+    n_actions = probs.probs.shape[-1]
+    random_actions = torch.randint(0, n_actions, base.shape, device=base.device)
+    flip = torch.rand(base.shape, device=base.device) < epsilon
+    return torch.where(flip, random_actions, base)
 
 
 def greedy_sample(probs: Categorical):
@@ -76,6 +87,8 @@ def sample_from_categorical(probs: Categorical, method: str, **kwargs):
     """
     if method == "basic":
         return basic_sample(probs)
+    elif method == "epsilon":
+        return epsilon_sample(probs, epsilon=kwargs.get("epsilon", 0.01))
     elif method == "greedy":
         return greedy_sample(probs)
     elif method == "temperature":

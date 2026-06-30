@@ -8,8 +8,8 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "weapon" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
-CORRIDOR_DIR = None #"lower" #"lower" # lower Upper
+MODE = "daredevil" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+CORRIDOR_DIR = "lower" #"lower" # lower Upper
 EASY_ENV = False
 
 def parse_args():
@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="multi_style_env_" + MODE if EASY_ENV else "multi_style_env_hard_" + MODE,
+        default="four_style_env_" + MODE if EASY_ENV else "four_style_env_hard_" + MODE,
         help="the name of this experiment",
     )
     parser.add_argument(
@@ -60,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--env_id",
         type=str,
-        default="MiniGrid-multi_style",
+        default="MiniGrid-four_style",
         help="the environment id",
     )
     parser.add_argument(
@@ -133,7 +133,7 @@ def parse_args():
         "--vf_coef", type=float, default=0.5, help="value loss coefficient"
     )
     parser.add_argument(
-        "--ent_coef", type=float, default=0.02, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01 for weapon 0.012
+        "--ent_coef", type=float, default=0.012, help="entropy term coefficient" # for bypass mode or camouflage long path use 0.01 for weapon 0.012
     )
     parser.add_argument(
         "--max_grad_norm",
@@ -144,13 +144,13 @@ def parse_args():
     parser.add_argument(
         "--max_steps",
         type=int,
-        default=130, # 130 for weapon mode, 100 for bypass and camouflage and daredevil
+        default=100, # 130 for weapon mode, 100 for bypass and camouflage and daredevil
         help="the maximum number of steps total",
     )
     parser.add_argument(
         "--trajectory_path",
         type=str,
-        default="/home/sara/repositories/player_model_dt/datasets/minigrid/multi_style_env_hard_randomize_layout/PPO_trajectories_multi_style_env_" + MODE + "_" + str(CORRIDOR_DIR) + ".gz",
+        default="/home/sara/repositories/player_model_dt/datasets/minigrid/four_style_env_hard_randomize_layout/PPO_trajectories_four_style_env_" + MODE + "_" + str(CORRIDOR_DIR) + ".gz",
         help="the path to the trajectory file",
     )
     parser.add_argument(

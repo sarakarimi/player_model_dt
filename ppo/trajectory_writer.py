@@ -66,7 +66,11 @@ class TrajectoryWriter:
     ):
         self.observations.append(next_obs)
         self.actions.append(action)
-        self.rewards.append(reward)
+        # Exclude any dense PPO-shaping reward from the SAVED return: envs that
+        # do potential-based shaping report it in info["shaping_reward"], which
+        # was added to the reward fed to PPO but must not pollute the dataset.
+        shaping = info.get("shaping_reward", 0.0)
+        self.rewards.append(np.asarray(reward, dtype=float) - np.asarray(shaping, dtype=float))
         self.dones.append(done)
         self.truncated.append(truncated)
         if rtg is not None:

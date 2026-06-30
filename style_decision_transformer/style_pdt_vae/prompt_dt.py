@@ -26,11 +26,12 @@ from torch.utils.data import DataLoader
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
 from envs.multi_style_env import MiniGridMultiStyles
 from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_env import MiniGridFourStyles
 from style_decision_transformer.style_pdt_vae.paths import paths
 from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
 
 # style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
-style_names = {0: "bypass", 1: "weapon", 2: "camouflage", 3: "daredevil"}
+style_names = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 # =============================================================================
 # Dataset
@@ -454,7 +455,7 @@ def evaluate_online_prompting(
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
     eval_device:            str   = "cpu",
-    initial_rtg:            float = 3.2,
+    initial_rtg:            float = 2.5,
     env_kwargs:             dict  = None,
 ):
     """
@@ -468,7 +469,7 @@ def evaluate_online_prompting(
     eval_model.eval()
     if env_kwargs is None:
         env_kwargs = {}
-        env_kwargs["max_steps"] = 130
+        env_kwargs["max_steps"] = 100
 
     state_mean = torch.tensor(eval_dataset.state_mean, device=eval_device, dtype=torch.float32)
     state_std  = torch.tensor(eval_dataset.state_std,  device=eval_device, dtype=torch.float32)
@@ -499,7 +500,17 @@ def evaluate_online_prompting(
             prompt_tuple = (p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m)
 
             for ep in range(num_episodes_per_style):
-                if len(style_names) == 3:
+                if "portal" in style_names.values():
+                    env = MiniGridFourStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                elif len(style_names) == 3:
                     env = MiniGridThreeStyles(
                         target_style=style_names[style_id],
                         target_bonus=1.0,
@@ -662,7 +673,7 @@ def train_prompting_dt(
     eval_every:          int   = 10,
     eval_episodes_per_style: int = 50,
     max_ep_len:          int   = 100,
-    initial_rtg:         float = 3.2,
+    initial_rtg:         float = 2.5,
 ):
     model.to(device)
     model.train()
@@ -796,7 +807,7 @@ if __name__ == "__main__":
         act_dim=7,
         hidden_size=128,
         max_length=max_len,
-        max_ep_len=130,
+        max_ep_len=100,
         action_tanh=False,
         n_layer=4,
         n_head=8,
