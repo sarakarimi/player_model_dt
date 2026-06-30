@@ -139,22 +139,12 @@ def four_style_controls_from_episode_summary(
     if not isinstance(episode_summary, dict):
         episode_summary = {}
 
-    # risk: prefer the dedicated counter (steps adjacent to the active detection
-    # zone or lava, unprotected, enemy alive). For data collected before that
-    # counter existed, fall back to near-enemy-unprotected steps + portal_steps,
-    # where portal_steps stands in for "steps adjacent to the detection zone"
-    # (that is what the portal descent is, in practice). lava_adjacent_steps is
-    # intentionally NOT used: it isn't protection-aware and the only style that
-    # walks beside lava (daredevil) carries boots, so it must stay low-risk.
-    risk_exposure = episode_summary.get("risk_exposure_steps", None)
-    if risk_exposure is None:
-        risk_exposure = (int(episode_summary.get("enemy_near_unprotected_steps", 0))
-                         + int(episode_summary.get("portal_steps", 0)))
-    detection  = int(episode_summary.get("detection_steps", 0))
-    lava       = int(episode_summary.get("lava_steps",      0))
-    commitment = float(episode_summary.get("path_efficiency", 0.0))
+    risk_exposure = int(episode_summary.get("risk_exposure_steps", 0))
+    detection     = int(episode_summary.get("detection_steps",     0))
+    lava          = int(episode_summary.get("lava_steps",          0))
+    commitment    = float(episode_summary.get("path_efficiency",   0.0))
 
-    risk_taking      = np.clip(float(risk_exposure) / risk_full, 0.0, 1.0)
+    risk_taking      = np.clip(risk_exposure / risk_full, 0.0, 1.0)
     stealth_exposure = np.clip((detection + lava) / stealth_full, 0.0, 1.0)
 
     return np.array(
@@ -229,7 +219,7 @@ class TrajectoryDataset(Dataset):
 
             # total target per style/group, split as evenly as possible across
             # its sub-datasets (the first sub-path absorbs any remainder).
-            group_samples = 1000
+            group_samples = 2000
             per_sub = [group_samples // n_sub] * n_sub
             per_sub[0] += group_samples - sum(per_sub)
 
@@ -418,11 +408,11 @@ class TrajectoryDataset(Dataset):
         # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
         # print(top_seq_lengths)
         # seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
-        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
-        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
-        # print(len(states))
-        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
+        top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
         print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        # print(len(states))
+        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
+        # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
         index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
 
         if self.select_highest_count_return_group:  # TEMPORARY TEST
@@ -452,8 +442,8 @@ class TrajectoryDataset(Dataset):
 
         # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=20)
         # print(top_seq_lengths)
-        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
-        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.59)
+        top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
+        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
         print(sum([count for (len, ret, count, idx) in top_seq_lengths]))
 
 
