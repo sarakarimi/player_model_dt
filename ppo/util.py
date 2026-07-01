@@ -8,7 +8,7 @@ from configs import ConfigJsonEncoder
 import torch as t
 
 
-MODE = "daredevil" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
+MODE = "weapon" # "daredevil" #"camouflage" #"bypass" #camouflage" # backstab, bypass, weapon if EASY_ENV = True camouflage, bypass, weapon otherwise
 CORRIDOR_DIR = "lower" #"lower" # lower Upper
 EASY_ENV = False
 

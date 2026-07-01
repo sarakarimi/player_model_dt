@@ -219,7 +219,7 @@ class TrajectoryDataset(Dataset):
 
             # total target per style/group, split as evenly as possible across
             # its sub-datasets (the first sub-path absorbs any remainder).
-            group_samples = 2000
+            group_samples = 1000
             per_sub = [group_samples // n_sub] * n_sub
             per_sub[0] += group_samples - sum(per_sub)
 

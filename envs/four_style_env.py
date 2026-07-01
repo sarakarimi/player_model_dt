@@ -361,7 +361,13 @@ class MiniGridFourStyles(MiniGridEnv):
         if self.randomize_layout:
             occupied = {self.enemy_pos, self.goal_pos, self.portal_out_pos, (1, 8)}
             c_pos = self._rand_cell((1, 2), (2, 4), occupied)      # camo
-            w_pos = self._rand_cell((3, 4), (3, 5), occupied)      # weapon
+            # weapon: for the weapon run, spawn near the enemy attack tile (x4-5,
+            # y5-6) so pickup->kill is short and landmark-guided; other styles keep
+            # the original distractor zone (so only weapon needs re-collecting).
+            if self.target_style == "weapon":
+                w_pos = self._rand_cell((4, 5), (5, 6), occupied)
+            else:
+                w_pos = self._rand_cell((3, 4), (3, 5), occupied)
             b_pos = self._rand_cell((2, 3), (6, 7), occupied)      # boots
             self.portal_in_pos = self._rand_cell((3, 5), (11, 11), occupied)  # portal-in zone x3-5, y=11
         else:
@@ -702,7 +708,7 @@ if __name__ == "__main__":
         render_mode="human",
         randomize_layout=True,
         max_steps=100,
-        agent_view_size=7,
+        agent_view_size=3,
     )
     obs, _ = env.reset()
     ret, finish = 0.0, False
