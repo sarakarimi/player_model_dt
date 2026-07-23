@@ -63,14 +63,14 @@ STYLE_ORDER = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 # vectors are overwritten with per-style dataset means inside main() once the
 # dataset is loaded.
 CANONICAL = {
-    "portal":     np.array([0.70, 0.00, 0.70], dtype=np.float32),
-    "weapon":     np.array([0.80, 0.00, 0.50], dtype=np.float32),
-    "camouflage": np.array([0.20, 1.00, 0.75], dtype=np.float32),
-    "daredevil":  np.array([0.15, 1.00, 0.67], dtype=np.float32),
+    "portal":     np.array([0.35, 0.19, 0.79], dtype=np.float32),
+    "weapon":     np.array([1.00, 0.06, 0.55], dtype=np.float32),
+    "camouflage": np.array([0.37, 0.42, 0.74], dtype=np.float32),
+    "daredevil":  np.array([0.58, 0.47, 0.64], dtype=np.float32),
 }
 
-GRID_SIZE   = 11
-CENTER_ROW  = (GRID_SIZE - 1) / 2.0   # 8.0
+GRID_SIZE   = 13                      # MiniGridFourStyles.size
+CENTER_ROW  = (GRID_SIZE - 1) / 2.0   # 6.0
 INITIAL_RTG = 2.5
 MAX_EP_LEN  = 100
 DTW_MAX_PTS = 64                      # subsample long paths before DTW
@@ -248,19 +248,29 @@ def collect_group(model_name, models, ctrl_vec, target_style,
 
 
 def group_metrics(paths, achieved, target_style):
-    h_route, route_counts = route_entropy(paths)
+    # Diversity (D_traj, H_route) is measured only over style-consistent
+    # trajectories: those that achieved the style they were prompted for.
+    consistent = [p for p, a in zip(paths, achieved) if a == target_style]
+    h_route, route_counts = route_entropy(consistent)
+    d_traj = mean_pairwise_dtw(consistent)
     sar = float(np.mean([a == target_style for a in achieved])) if achieved else 0.0
     return {
-        "D_traj": mean_pairwise_dtw(paths),
-        "H_route": h_route,
+        "D_traj": d_traj,          # raw diversity AMONG on-style trajectories
+        "H_route": h_route,        # raw route entropy among on-style trajectories
         "SAR": sar,
+        # SAR-weighted ("usable") diversity: a model is credited for diversity
+        # only to the extent it actually stays on-style. Low SAR shrinks it, so a
+        # model that is diverse only because it wanders off-style is penalised.
+        "D_traj_eff": sar * d_traj,
+        "H_route_eff": sar * h_route,
+        "n_consistent": len(consistent),
         "route_counts": route_counts,
     }
 
 
 def aggregate(per_seed):
     out = {}
-    for key in ("D_traj", "H_route", "SAR"):
+    for key in ("D_traj", "H_route", "SAR", "D_traj_eff", "H_route_eff"):
         vals = np.array([s[key] for s in per_seed], dtype=np.float64)
         out[key + "_mean"] = float(vals.mean())
         out[key + "_std"] = float(vals.std())
@@ -446,12 +456,15 @@ def main():
                 )
                 per_seed.append(group_metrics(p, ach, style))
                 if si == 0:
-                    overlay_data[style][name] = (p, img)
+                    # Only plot style-consistent (successful) trajectories.
+                    consistent_paths = [pp for pp, aa in zip(p, ach) if aa == style]
+                    overlay_data[style][name] = (consistent_paths, img)
             agg = aggregate(per_seed)
             table[style][name] = agg
-            print(f"  {name:10s}  D_traj={agg['D_traj_mean']:.3f}±{agg['D_traj_std']:.3f}"
-                  f"   H_route={agg['H_route_mean']:.3f}±{agg['H_route_std']:.3f}"
-                  f"   SAR={agg['SAR_mean']:.3f}±{agg['SAR_std']:.3f}")
+            print(f"  {name:10s}  D_eff={agg['D_traj_eff_mean']:.3f}±{agg['D_traj_eff_std']:.3f}"
+                  f"   (D_traj={agg['D_traj_mean']:.3f} × SAR={agg['SAR_mean']:.3f})"
+                  f"   H_eff={agg['H_route_eff_mean']:.3f}"
+                  f"   H_route={agg['H_route_mean']:.3f}")
 
     # ---- save numbers ----
     with open(os.path.join(save_dir, "diversity_results.json"), "w") as f:
@@ -459,17 +472,21 @@ def main():
     print(f"\nSaved {os.path.join(save_dir, 'diversity_results.json')}")
 
     # ---- printed summary table ----
-    print("\n" + "=" * 78)
-    print(f"{'style':12s} {'model':10s} {'D_traj↑':>14s} {'H_route↑':>14s} {'SAR↑':>14s}")
-    print("-" * 78)
+    print("\n" + "=" * 92)
+    print(f"{'style':12s} {'model':10s} {'D_eff↑':>11s} {'D_traj':>9s} "
+          f"{'H_eff↑':>9s} {'H_route':>9s} {'SAR↑':>9s}")
+    print("(D_eff = D_traj × SAR ; H_eff = H_route × SAR)")
+    print("-" * 92)
     for style in args.styles:
         for name in model_names:
             a = table[style][name]
             print(f"{style:12s} {name:10s} "
-                  f"{a['D_traj_mean']:7.3f}±{a['D_traj_std']:.3f} "
-                  f"{a['H_route_mean']:7.3f}±{a['H_route_std']:.3f} "
-                  f"{a['SAR_mean']:7.3f}±{a['SAR_std']:.3f}")
-    print("=" * 78)
+                  f"{a['D_traj_eff_mean']:6.3f}±{a['D_traj_eff_std']:.3f} "
+                  f"{a['D_traj_mean']:9.3f} "
+                  f"{a['H_route_eff_mean']:9.3f} "
+                  f"{a['H_route_mean']:9.3f} "
+                  f"{a['SAR_mean']:6.3f}±{a['SAR_std']:.3f}")
+    print("=" * 92)
 
     # ---- plots ----
     print("\nPlots:")

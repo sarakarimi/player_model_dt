@@ -19,6 +19,8 @@ Rollout (online, per style):
   avg_path_efficiency      proxy for commitment / directness
   weapon_usage_rate        % of episodes where weapon was picked up
   camouflage_usage_rate    % of episodes where camouflage was picked up
+  daredevil_usage_rate     % of episodes where lava was traversed
+  portal_usage_rate        % of episodes where the portal was used
 
 Control fidelity (StyleVAE and ControlDT, requires control_vector per episode):
   mean_abs_spearman_r      mean |Spearman r| between control dims and outcomes
@@ -74,6 +76,8 @@ from style_decision_transformer.style_pdt_vae.control_prompt_pdt import (
 from style_decision_transformer.style_pdt_vae.sorl import (
     SODataset,
     BCPolicy as SORLPolicy,
+    derive_style_map,
+    print_cluster_composition,
 )
 from envs.three_style_env import MiniGridThreeStyles
 from envs.multi_style_env import MiniGridMultiStyles
@@ -236,6 +240,7 @@ class EpisodeRecord:
     picked_weapon:      Optional[bool]  = None
     picked_camouflage:  Optional[bool]  = None
     traversed_lava:     Optional[bool]  = None   # daredevil style (multi-style env)
+    used_portal:        Optional[bool]  = None   # portal style (four-style env)
     # control vector recomputed from the rollout outcome (env-appropriate formula),
     # compared against control_vector to measure control fidelity.
     achieved_control:   Optional[np.ndarray] = None
@@ -760,7 +765,7 @@ def _rollout_episode(
     done      = False
     t         = 0
     info      = {}
-    env.reset()  # ensure env can render for episode summary
+    # env.reset()  # ensure env can render for episode summary
     while not done and t < max_ep_len:
         attn_mask = torch.ones((1, states.shape[1]), dtype=torch.float32, device=device)
         action = adapter.get_action(states, actions, rtgs, timesteps, attn_mask)
@@ -799,11 +804,16 @@ def _rollout_episode(
         path_efficiency=es.get("path_efficiency") if es else None,
         items_picked=es.get("items_picked") if es else None,
         # Three-style env reports picked_weapon/picked_camouflage; the multi-style
-        # env reports killed_with_weapon/traversed_detection_with_camo instead.
-        # Fall back so the usage rates are populated for either env.
+        # env reports killed_with_weapon/traversed_detection_with_camo; the four-style
+        # env reports killed_with_weapon/traversed_detection. Fall back so the usage
+        # rates are populated for any env.
         picked_weapon=(es.get("picked_weapon", es.get("killed_with_weapon")) if es else None),
-        picked_camouflage=(es.get("picked_camouflage", es.get("traversed_detection_with_camo")) if es else None),
+        picked_camouflage=(
+            es.get("picked_camouflage",
+                   es.get("traversed_detection_with_camo",
+                          es.get("traversed_detection"))) if es else None),
         traversed_lava=es.get("traversed_lava") if es else None,
+        used_portal=es.get("used_portal") if es else None,
         achieved_control=achieved_control_from_summary(es),
     )
 
@@ -897,6 +907,7 @@ def aggregate_rollout_metrics(records: List[EpisodeRecord]) -> dict:
             "weapon_usage_rate":      _mf(successes, "picked_weapon"),
             "camouflage_usage_rate":  _mf(successes, "picked_camouflage"),
             "daredevil_usage_rate":   _mf(successes, "traversed_lava"),
+            "portal_usage_rate":      _mf(successes, "used_portal"),
         }
 
     per_style = {
@@ -1106,6 +1117,7 @@ def print_metrics_table(metrics: dict, model_name: str = "Model"):
         "avg_episode_length", "detection_rate",
         "avg_enemy_distance", "avg_path_efficiency",
         "weapon_usage_rate", "camouflage_usage_rate", "daredevil_usage_rate",
+        "portal_usage_rate",
     ]:
         ov  = metrics["rollout"]["overall"].get(k, float("nan"))
         row = f"{k:<30} {ov:>10.3f}"
@@ -1391,6 +1403,7 @@ def print_metrics_table_mean_std(mean_metrics: dict, std_metrics: dict, model_na
         "avg_episode_length", "detection_rate",
         "avg_enemy_distance", "avg_path_efficiency",
         "weapon_usage_rate", "camouflage_usage_rate", "daredevil_usage_rate",
+        "portal_usage_rate",
     ]:
         ov = mean_metrics["rollout"]["overall"].get(k, float("nan"))
         os = std_metrics["rollout"]["overall"].get(k, float("nan"))
@@ -1463,7 +1476,7 @@ if __name__ == "__main__":
     # differs from the training data; PromptDT/ControlDT used a fixed 130), we read
     # it back from each checkpoint so the rebuilt model always matches.
     DEFAULT_MAX_EP_LEN = dataset.max_ep_len + 1
-    DT_MAX_EP_LEN      = 130
+    DT_MAX_EP_LEN      = 100
     print(f"max trajectory length in eval data = {dataset.max_ep_len}")
 
     # 1. StyleVAE (main model)
@@ -1541,8 +1554,16 @@ if __name__ == "__main__":
             print(f"SORL checkpoint not found: {ckpt} — using random weights.")
         p.to(DEVICE)
         sorl_policies[k] = p
-    # style_map: adjust if print_cluster_composition() shows misaligned clusters
-    adapters["SORL"] = SOAdapter(sorl_policies, so_dataset, device=DEVICE)
+    # SORL clusters are discovered unsupervised, so cluster index k does not match
+    # the env's style id ordering. Align them for evaluation-only reporting: map
+    # each ground-truth style to the discovered cluster that best represents it.
+    sorl_policy_list = [sorl_policies[k] for k in range(len(sorl_policies))]
+    print_cluster_composition(sorl_policy_list, so_dataset, device=DEVICE,
+                              style_names=STYLE_NAMES)
+    sorl_style_map = derive_style_map(sorl_policy_list, so_dataset, device=DEVICE)
+    print(f"SORL style_map (env_style_id -> cluster): {sorl_style_map}")
+    adapters["SORL"] = SOAdapter(sorl_policies, so_dataset, device=DEVICE,
+                                 style_map=sorl_style_map)
 
     # 5. ControlDT
     ctrl_ckpt = os.path.join(MODELS_DIR, "control_dt_minigrid.pth")
@@ -1567,7 +1588,7 @@ if __name__ == "__main__":
     eval_kwargs = dict(
         dataset=dataset,
         device=DEVICE,
-        num_episodes_per_style=5,
+        num_episodes_per_style=100,
         num_conditionings=5,
         max_ep_len=100,
         initial_rtg=1.0,

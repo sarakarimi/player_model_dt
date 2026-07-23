@@ -364,10 +364,10 @@ class MiniGridFourStyles(MiniGridEnv):
             # weapon: for the weapon run, spawn near the enemy attack tile (x4-5,
             # y5-6) so pickup->kill is short and landmark-guided; other styles keep
             # the original distractor zone (so only weapon needs re-collecting).
-            if self.target_style == "weapon":
-                w_pos = self._rand_cell((4, 5), (5, 6), occupied)
-            else:
-                w_pos = self._rand_cell((3, 4), (3, 5), occupied)
+            # if self.target_style == "weapon":
+            #     w_pos = self._rand_cell((4, 5), (5, 6), occupied)
+            # else:
+            w_pos = self._rand_cell((3, 4), (3, 5), occupied)
             b_pos = self._rand_cell((2, 3), (6, 7), occupied)      # boots
             self.portal_in_pos = self._rand_cell((3, 5), (11, 11), occupied)  # portal-in zone x3-5, y=11
         else:

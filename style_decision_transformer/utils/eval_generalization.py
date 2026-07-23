@@ -86,15 +86,24 @@ STYLE_ORDER = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}
 
 # Fallback canonical vectors if a style is absent from the dataset.
 _FALLBACK_CANONICAL = {
-    "portal":     np.array([0.70, 0.00, 0.70], dtype=np.float32),
-    "weapon":     np.array([0.80, 0.00, 0.50], dtype=np.float32),
-    "camouflage": np.array([0.20, 1.00, 0.75], dtype=np.float32),
-    "daredevil":  np.array([0.15, 1.00, 0.67], dtype=np.float32),
+    "portal":     np.array([0.35, 0.19, 0.79], dtype=np.float32),
+    "weapon":     np.array([1.00, 0.06, 0.55], dtype=np.float32),
+    "camouflage": np.array([0.37, 0.42, 0.74], dtype=np.float32),
+    "daredevil":  np.array([0.58, 0.47, 0.64], dtype=np.float32),
 }
 
 
 def _lerp(a, b, t):
     return ((1 - t) * a + t * b).astype(np.float32)
+
+
+def _infer_max_ep_len(state_dict, default=100):
+    """max_ep_len implied by a checkpoint's timestep-embedding table."""
+    if state_dict:
+        for k, v in state_dict.items():
+            if k.endswith("embed_timestep.weight"):
+                return int(v.shape[0])
+    return default
 
 
 def canonical_controls_from_dataset(dataset) -> Dict[str, np.ndarray]:
@@ -122,26 +131,26 @@ def build_style_combinations(dataset) -> Dict[str, list]:
     return {
         "weapon_x_camouflage": [
             ("100% weapon\n0% camo",       _lerp(_W, _C, 0.0)),
-            ("60% weapon\n40% camo",       _lerp(_W, _C, 0.4)),
-            ("40% weapon\n60% camo",       _lerp(_W, _C, 0.6)),
+            ("60% weapon\n40% camo",       _lerp(_W, _C, 0.36)),
+            ("40% weapon\n60% camo",       _lerp(_W, _C, 0.40)),
             ("0% weapon\n100% camo",       _lerp(_W, _C, 1.0)),
         ],
         "weapon_x_portal": [
             ("100% weapon\n0% portal",     _lerp(_W, _P, 0.0)),
-            ("60% weapon\n40% portal",     _lerp(_W, _P, 0.4)),
-            ("40% weapon\n60% portal",     _lerp(_W, _P, 0.6)),
+            ("60% weapon\n40% portal",     _lerp(_W, _P, 0.46)),
+            ("40% weapon\n60% portal",     _lerp(_W, _P, 0.49)),
             ("0% weapon\n100% portal",     _lerp(_W, _P, 1.0)),
         ],
         "portal_x_camouflage": [
             ("100% portal\n0% camo",       _lerp(_P, _C, 0.0)),
-            ("60% portal\n40% camo",       _lerp(_P, _C, 0.4)),
-            ("40% portal\n60% camo",       _lerp(_P, _C, 0.6)),
+            ("60% portal\n40% camo",       _lerp(_P, _C, 0.58)),
+            ("40% portal\n60% camo",       _lerp(_P, _C, 0.62)),
             ("0% portal\n100% camo",       _lerp(_P, _C, 1.0)),
         ],
         "camouflage_x_daredevil": [
             ("100% camo\n0% daredevil",    _lerp(_C, _D, 0.0)),
-            ("60% camo\n40% daredevil",    _lerp(_C, _D, 0.4)),
-            ("40% camo\n60% daredevil",    _lerp(_C, _D, 0.6)),
+            ("60% camo\n40% daredevil",    _lerp(_C, _D, 0.45)),
+            ("40% camo\n60% daredevil",    _lerp(_C, _D, 0.54)),
             ("0% camo\n100% daredevil",    _lerp(_C, _D, 1.0)),
         ],
     }
@@ -155,7 +164,7 @@ OOD_CONTROLS: Dict[str, np.ndarray] = {
 }
 
 # Number of rollout episodes per control vector
-NUM_EPISODES = 1 #20
+NUM_EPISODES = 50
 
 
 # ===========================================================================
@@ -206,6 +215,7 @@ def _run_episodes_with_control(
             def control_vector(_): return ctrl_np
 
         adapter = _VAEAdHoc()
+        max_context = getattr(vae_model.dt, "max_length", max_context)
 
     else:  # ControlDT
         assert ctrl_model is not None
@@ -227,6 +237,7 @@ def _run_episodes_with_control(
             def control_vector(_): return ctrl_np
 
         adapter = _CtrlAdHoc()
+        max_context = getattr(ctrl_model, "max_length", max_context)
 
     adapter.eval()
     records: List[EpisodeRecord] = []
@@ -240,6 +251,7 @@ def _run_episodes_with_control(
                 agent_view_size=3,
                 randomize_layout=True,
                 eval_mode=True,
+                max_steps=100,
                 # render_mode="human",
             )
             outcome = _rollout_episode(
@@ -300,8 +312,8 @@ def _aggregate_records(records: List[EpisodeRecord]) -> dict:
         "detection_rate":        float(np.mean([r.detected for r in records])),
         "avg_enemy_distance":    _mf(success, "avg_enemy_distance"),
         "avg_path_efficiency":   _mf(success, "path_efficiency"),
-        "weapon_usage_rate":     float(np.mean([r.picked_weapon      for r in success])) if success else float("nan"),
-        "camouflage_usage_rate": float(np.mean([r.picked_camouflage  for r in success])) if success else float("nan"),
+        "weapon_usage_rate":     _mf(success, "picked_weapon"),      # None-safe (nan if unavailable)
+        "camouflage_usage_rate": _mf(success, "picked_camouflage"),  # None-safe (nan if unavailable)
         "style_distribution":    style_dist,
         "style_entropy":         entropy,
     }
@@ -709,29 +721,38 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Load models
     # ------------------------------------------------------------------
+    # Checkpoints live under style_pdt_vae/trained_models/, not utils/.
+    trained_dir = os.path.join(HERE, "..", "style_pdt_vae", "trained_models")
+
     print("Loading StyleVAE …")
+    vae_ckpt = os.path.join(trained_dir, "style_prompt_dt_minigrid_controls_condprior.pth")
+    vae_sd = torch.load(vae_ckpt, map_location=DEVICE) if os.path.exists(vae_ckpt) else None
+    vae_mel = _infer_max_ep_len(vae_sd)
     vae_model = StyleVAEPromptDT(
         state_dim=9, act_dim=7, hidden_size=128, latent_dim=16,
-        max_length=20, max_ep_len=100, action_tanh=False,
+        max_length=20, max_ep_len=vae_mel, action_tanh=False,
         beta=0.0085, control_dim=control_dim, prior_hidden=128,
         free_bits=0.0, n_layer=4, n_head=8,
     )
-    vae_ckpt = os.path.join(HERE, "trained_models/style_prompt_dt_minigrid_controls_condprior.pth")
-    if os.path.exists(vae_ckpt):
-        vae_model.load_state_dict(torch.load(vae_ckpt, map_location=DEVICE))
+    if vae_sd is not None:
+        vae_model.load_state_dict(vae_sd)
+        print(f"  Loaded StyleVAE (max_ep_len={vae_mel}): {vae_ckpt}")
     else:
         print(f"  WARNING: VAE checkpoint not found at {vae_ckpt} — using random weights.")
     vae_model.to(DEVICE).eval()
 
     print("Loading ControlDT …")
+    ctrl_ckpt = os.path.join(trained_dir, "control_dt_minigrid.pth")
+    ctrl_sd = torch.load(ctrl_ckpt, map_location=DEVICE) if os.path.exists(ctrl_ckpt) else None
+    ctrl_mel = _infer_max_ep_len(ctrl_sd)
     ctrl_model = ControlConditionedDT(
         state_dim=9, act_dim=7, hidden_size=128,
-        control_dim=control_dim, max_length=8, max_ep_len=100,
+        control_dim=control_dim, max_length=8, max_ep_len=ctrl_mel,
         action_tanh=False, n_layer=4, n_head=8,
     )
-    ctrl_ckpt = os.path.join(HERE, "trained_models/control_dt_minigrid.pth")
-    if os.path.exists(ctrl_ckpt):
-        ctrl_model.load_state_dict(torch.load(ctrl_ckpt, map_location=DEVICE))
+    if ctrl_sd is not None:
+        ctrl_model.load_state_dict(ctrl_sd)
+        print(f"  Loaded ControlDT (max_ep_len={ctrl_mel}): {ctrl_ckpt}")
     else:
         print(f"  WARNING: ControlDT checkpoint not found at {ctrl_ckpt} — using random weights.")
     ctrl_model.to(DEVICE).eval()

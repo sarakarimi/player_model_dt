@@ -114,38 +114,44 @@ FOUR_STYLE_SUMMARY_KEYS = ("risk_exposure_steps", "portal_steps")
 
 def four_style_controls_from_episode_summary(
     episode_summary,
-    risk_full: float = 6.0,
-    stealth_full: float = 5.0,
+    enemy_dist_norm: float = 12.0,
 ) -> np.ndarray:
     """
     Build a float32 control vector from a MiniGridFourStyles episode_summary.
 
     Dimensions: [risk_taking, stealth_exposure, commitment]
 
-    risk_taking      — steps spent ADJACENT to the active detection zone or lava
-                       while carrying no protection (no camo/boots) and the enemy
-                       is alive. Highest for portal (long x11 descent beside the
-                       detection zone), then weapon; ~0 for camo (carries camo)
-                       and daredevil (carries boots).
-    stealth_exposure — immunity from danger: steps spent IN danger protected (in
-                       the detection zone with camo, or on lava with boots). High
-                       for camo and daredevil; ~0 for weapon and portal (they
-                       never safely enter danger).
+    risk_taking      — enemy proximity: 1 - avg_enemy_distance / enemy_dist_norm.
+                       Continuous and non-zero for every style. Weapon kills the
+                       enemy (avg distance -> 0) so it saturates near 1; then camo
+                       (passes near), portal (descends nearby), daredevil (goes
+                       south, farthest). Smooth spread, no style is exactly 0.
+    stealth_exposure — hazard engagement, protection-agnostic: fraction of the
+                       episode spent in or beside a hazard (detection zone / lava).
+                       The _adjacent terms keep weapon/portal non-zero (they travel
+                       beside hazards), while camo/daredevil are highest (traverse
+                       inside). Continuous, no style is exactly 0.
     commitment       — path directness (forward_steps / total_steps).
 
-    Normalising constants saturate a "full" engagement near 1 and are tunable
-    from the real count distributions; controls are recomputed on load.
+    Normalising constants are tunable from the real count distributions; controls
+    are recomputed on load.
     """
     if not isinstance(episode_summary, dict):
         episode_summary = {}
 
-    risk_exposure = int(episode_summary.get("risk_exposure_steps", 0))
-    detection     = int(episode_summary.get("detection_steps",     0))
-    lava          = int(episode_summary.get("lava_steps",          0))
-    commitment    = float(episode_summary.get("path_efficiency",   0.0))
+    avg_dist          = float(episode_summary.get("avg_enemy_distance",       0.0))
+    detection         = int(episode_summary.get("detection_steps",           0))
+    lava              = int(episode_summary.get("lava_steps",                0))
+    detection_adj     = int(episode_summary.get("detection_adjacent_steps",  0))
+    lava_adj          = int(episode_summary.get("lava_adjacent_steps",       0))
+    total_steps       = max(int(episode_summary.get("total_steps",           1)), 1)
+    commitment        = float(episode_summary.get("path_efficiency",         0.0))
 
-    risk_taking      = np.clip(risk_exposure / risk_full, 0.0, 1.0)
-    stealth_exposure = np.clip((detection + lava) / stealth_full, 0.0, 1.0)
+    risk_taking      = np.clip(1.0 - avg_dist / enemy_dist_norm, 0.0, 1.0)
+    stealth_exposure = np.clip(
+        (detection + lava + 0.5 * (detection_adj + lava_adj)) / total_steps,
+        0.0, 1.0,
+    )
 
     return np.array(
         [risk_taking, stealth_exposure, commitment],
@@ -408,11 +414,14 @@ class TrajectoryDataset(Dataset):
         # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
         # print(top_seq_lengths)
         # seq_lens = [seq_len[0] for seq_len in top_seq_lengths]
-        top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
-        print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
-        # print(len(states))
-        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
+
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
         # print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
+        # index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
+
+
+        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
+        print([(len, ret, count) for (len, ret, count, idx) in top_seq_lengths])
         index_lists = [idx for (_, _, _, index_len) in top_seq_lengths for idx in index_len]
 
         if self.select_highest_count_return_group:  # TEMPORARY TEST
@@ -440,10 +449,13 @@ class TrajectoryDataset(Dataset):
         timesteps = [timesteps[idx] for idx in indexes]
         terminal_infos = [raw_terminal_infos[idx] for idx in indexes]
 
-        # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=20)
+        # top_seq_lengths = self.get_top_trajectory_lengths(states, returns, top_k=10)
         # print(top_seq_lengths)
-        top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
-        # top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
+
+        # top_seq_lengths = self.get_top_trajectory_returns(states, returns, top_k=20)
+        # print(sum([count for (len, ret, count, idx) in top_seq_lengths]))
+
+        top_seq_lengths = self.get_trajectories_above_return(states, returns, 1.9)
         print(sum([count for (len, ret, count, idx) in top_seq_lengths]))
 
 

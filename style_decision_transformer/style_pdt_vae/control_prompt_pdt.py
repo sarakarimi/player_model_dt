@@ -718,7 +718,7 @@ if __name__ == "__main__":
     train_control_dt(
         model=model,
         dataloader=loader,
-        num_epochs=100,
+        num_epochs=50,
         device=device,
         lr=1e-3,
         grad_clip=1.0,

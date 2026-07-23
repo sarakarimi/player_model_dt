@@ -19,6 +19,7 @@ Usage (standalone):
 """
 
 import os
+from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -632,32 +633,87 @@ def evaluate_sorl(
 # =============================================================================
 
 def print_cluster_composition(
-    policies: list,
-    dataset:  SODataset,
-    device:   str = "cpu",
+    policies:    list,
+    dataset:     SODataset,
+    device:      str = "cpu",
+    style_names: Optional[Dict[int, str]] = None,
 ) -> np.ndarray:
     """
     Print the ground-truth style composition of each discovered SORL cluster.
     Useful for diagnosing EM collapse and checking index alignment.
     Returns the hard assignment array [N].
+
+    The number of ground-truth styles is inferred from the data, so this works
+    for the three-, multi-, and four-style envs. Pass `style_names` to label the
+    columns; otherwise generic "style<i>" names are used.
     """
     W           = compute_soft_assignments(policies, dataset, device=device)
     hard_assign = W.argmax(axis=1)                        # [N] discovered cluster
     true_labels = dataset.true_tasks                      # [N] ground-truth style
     K           = len(policies)
-    style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+    S           = (int(true_labels.max()) + 1) if len(true_labels) else 0
+    if style_names is not None:
+        S = max(S, max(style_names) + 1)
+    else:
+        style_names = {i: f"style{i}" for i in range(S)}
+
+    def _name(s): return style_names.get(s, f"style{s}")
 
     print("\n=== SORL Cluster Composition (ground-truth style counts per cluster) ===")
-    print(f"{'cluster':<10}" + "".join(f"{style_names[s]:>12}" for s in range(3)) + f"{'total':>10}  {'dominant':>12}")
+    print(f"{'cluster':<10}" + "".join(f"{_name(s):>12}" for s in range(S)) + f"{'total':>10}  {'dominant':>12}")
     for k in range(K):
         mask   = hard_assign == k
-        counts = np.bincount(true_labels[mask], minlength=3)
-        dom    = style_names.get(int(counts.argmax()), "?")
-        print(f"  {k:<8}" + "".join(f"{counts[s]:>12}" for s in range(3)) + f"{mask.sum():>10}  {dom:>12}")
+        counts = np.bincount(true_labels[mask], minlength=S)
+        dom    = _name(int(counts.argmax())) if mask.sum() else "-"
+        print(f"  {k:<8}" + "".join(f"{counts[s]:>12}" for s in range(S)) + f"{mask.sum():>10}  {dom:>12}")
 
     mean_ent = float(-(W * np.log(W + 1e-8)).sum(axis=1).mean())
     print(f"\n  Mean assignment entropy = {mean_ent:.4f}  (0=hard, ln(K)={np.log(K):.3f}=uniform)")
     return hard_assign
+
+
+def derive_style_map(
+    policies: list,
+    dataset:  SODataset,
+    device:   str = "cpu",
+) -> Dict[int, int]:
+    """
+    Align discovered SORL clusters to ground-truth styles for EVALUATION ONLY.
+
+    Returns {env_style_id: cluster_k}, the map SOAdapter expects. SORL training
+    never uses labels (it is unsupervised EM); this is a post-hoc alignment used
+    solely to report metrics per ground-truth style — the standard protocol for
+    evaluating unsupervised style discovery.
+
+    Clusters are matched to styles by maximum agreement on the cluster×style
+    confusion counts (optimal one-to-one assignment via Hungarian when available;
+    otherwise a greedy per-style fallback). Any style left unmatched (e.g. when
+    #clusters < #styles) falls back to the cluster where that style is most
+    represented.
+    """
+    W           = compute_soft_assignments(policies, dataset, device=device)
+    hard_assign = W.argmax(axis=1)                        # [N] discovered cluster
+    true_labels = dataset.true_tasks                      # [N] ground-truth style
+    K           = len(policies)
+    S           = (int(true_labels.max()) + 1) if len(true_labels) else 0
+
+    # confusion counts C[k, s] = #trajectories in cluster k with true style s
+    C = np.zeros((K, S), dtype=np.int64)
+    np.add.at(C, (hard_assign, true_labels), 1)
+
+    # greedy default: each style -> cluster holding the most of that style
+    style_map = {int(s): int(C[:, s].argmax()) for s in range(S)}
+
+    # optimal bijection (maximise total agreement) when scipy is available
+    try:
+        from scipy.optimize import linear_sum_assignment
+        rows, cols = linear_sum_assignment(-C)           # rows=clusters, cols=styles
+        for k, s in zip(rows, cols):
+            style_map[int(s)] = int(k)
+    except Exception:
+        pass
+
+    return style_map
 
 
 def _plot_eval_history(eval_history: dict, save_path: str = "eval_results_sorl.png"):
@@ -765,7 +821,7 @@ if __name__ == "__main__":
             policies=policies,
             value_net=value_net,
             dataset=dataset,
-            num_em_iters=100,
+            num_em_iters=50,
             m_step_epochs=5,
             batch_size=256,
             lr=1e-3,
