@@ -1,13 +1,6 @@
-"""
-Style-VAE + Decision Transformer for MiniGrid.
-
-This model learns to:
-1. Encode full trajectories (states, actions) into a style latent variable
-2. Condition a Decision Transformer on that style to predict actions
-"""
 
 import random
-from typing import Callable
+from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,12 +9,16 @@ import torch.nn as nn
 import transformers
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
-from envs.three_style_env import MiniGridThreeStyles
-from style_decision_transformer.style_pdt_vae.paths import paths
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
+from envs.three_style_minigrid_env import MiniGridThreeStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
+from style_decision_transformer.paths import paths
 from style_decision_transformer.utils.utils import cluster_latents, plot_embeddings
-from trajectory_gpt2 import GPT2Model
+from style_decision_transformer.trajectory_gpt2 import GPT2Model
+
+# style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+style_names = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 
 # =============================================================================
@@ -30,11 +27,10 @@ from trajectory_gpt2 import GPT2Model
 
 class MiniGridDataset(TrajectoryDataset):
     """
-    Dataset for style-VAE + Decision Transformer.
-
-    Returns both:
-    - Full trajectory: entire episode padded to max_seq_len (for encoder)
-    - Context window: random subsequence of length max_len (for decoder)
+    Returns:
+    - DT context window (states/actions/rtg/timesteps/mask)
+    - Full episode for encoder
+    - controls: per-trajectory designer controls (float vector)
     """
 
     def __init__(
@@ -51,6 +47,7 @@ class MiniGridDataset(TrajectoryDataset):
         state_normalization_factor=1,
         action_normalization_factor=1,
         device="cpu",
+        control_dim: int = 5,
     ):
         super().__init__(
             trajectory_paths=trajectory_paths,
@@ -69,21 +66,20 @@ class MiniGridDataset(TrajectoryDataset):
 
         self.seq_lens = [len(seq) for seq in self.states]
         self.max_seq_len = max(self.seq_lens)
+        self.control_dim = control_dim
+
 
     def get_traj(self, traj_index, max_len=100, prob_go_from_end=None):
-        """Sample a random context window from the trajectory."""
         traj_rewards = self.rewards[traj_index]
         traj_states = self.states[traj_index]
         traj_actions = self.actions[traj_index]
         traj_dones = self.dones[traj_index]
         traj_rtg = np.ones(traj_rewards.shape) * traj_rewards[-1].item()
 
-        # Choose start index
         si = random.randint(0, traj_rewards.shape[0] - 1)
         if prob_go_from_end is not None and random.random() < prob_go_from_end:
             si = max(0, traj_rewards.shape[0] - max_len)
 
-        # Slice trajectory
         s = traj_states[si:si + max_len].reshape(1, -1, *self.state_dim)
         a = traj_actions[si:si + max_len].reshape(1, -1, *self.act_dim)
         r = traj_rewards[si:si + max_len].reshape(1, -1, 1)
@@ -91,32 +87,28 @@ class MiniGridDataset(TrajectoryDataset):
         d = traj_dones[si:si + max_len].reshape(1, -1)
         ti = np.arange(si, si + s.shape[1]).reshape(1, -1)
 
-        # Pad to max_len
         tlen = s.shape[1]
         padding = max_len - tlen
         s = self.add_padding(s, 0, padding)
-        a = self.add_padding(a, -10, padding)  # -10 for invalid actions
+        a = self.add_padding(a, -10, padding)
         r = self.add_padding(r, 0, padding)
         rtg = self.add_padding(rtg, rtg[0, -1], padding)
         d = self.add_padding(d, 2, padding)
         ti = self.add_padding(ti, 0, padding)
         m = self.add_padding(np.ones((1, tlen)), 0, padding)
 
-        # Normalize
         s = (s - self.state_mean) / self.state_std
         rtg = rtg / self.rtg_scale
 
         return self.return_tensors(s, a, r, rtg, d, ti, m)
 
     def get_full_traj(self, traj_index):
-        """Get the full trajectory padded to max_seq_len."""
         traj_rewards = self.rewards[traj_index]
         traj_states = self.states[traj_index]
         traj_actions = self.actions[traj_index]
         traj_dones = self.dones[traj_index]
         traj_rtg = np.ones(traj_rewards.shape) * traj_rewards[-1].item()
 
-        # Full sequence from t=0
         s = traj_states.reshape(1, -1, *self.state_dim)
         a = traj_actions.reshape(1, -1, *self.act_dim)
         r = traj_rewards.reshape(1, -1, 1)
@@ -124,7 +116,6 @@ class MiniGridDataset(TrajectoryDataset):
         d = traj_dones.reshape(1, -1)
         ti = np.arange(0, s.shape[1]).reshape(1, -1)
 
-        # Pad to max_seq_len
         tlen = s.shape[1]
         padding = self.max_seq_len - tlen
         s = self.add_padding(s, 0, padding)
@@ -135,7 +126,6 @@ class MiniGridDataset(TrajectoryDataset):
         ti = self.add_padding(ti, 0, padding)
         m = self.add_padding(np.ones((1, tlen)), 0, padding)
 
-        # Normalize
         s = (s - self.state_mean) / self.state_std
         rtg = rtg / self.rtg_scale
 
@@ -144,17 +134,17 @@ class MiniGridDataset(TrajectoryDataset):
     def __getitem__(self, idx):
         traj_index = self.indices[idx]
 
-        # DT context window
         s, a, r, d, rtg, ti, m = self.get_traj(
             traj_index,
             max_len=self.max_len,
             prob_go_from_end=self.prob_go_from_end,
         )
 
-        # Full episode for encoder
         full_s, full_a, full_r, full_rtg, full_d, full_ti, full_m = self.get_full_traj(traj_index)
 
         task_label = self.tasks[traj_index]
+
+        controls = torch.tensor(self.controls[traj_index], dtype=torch.float32)  # [control_dim]
 
         if self.preprocess_observations is not None:
             s = self.preprocess_observations(s)
@@ -163,20 +153,20 @@ class MiniGridDataset(TrajectoryDataset):
         return (
             s, a, r, d, rtg, ti, m,
             full_s, full_a, full_r, full_rtg, full_d, full_ti, full_m,
+            controls,
             task_label,
         )
 
     @staticmethod
     def collate_fn(batch):
-        """Collate batch into dict format."""
         (
             states, actions, rewards, dones, rtgs, timesteps, masks,
             full_states, full_actions, full_rewards, full_rtgs, full_dones, full_timesteps, full_masks,
+            controls,
             task_labels,
         ) = zip(*batch)
 
         return {
-            # Decoder (context window)
             "states": torch.stack(states, dim=0),
             "actions": torch.stack(actions, dim=0),
             "rewards": torch.stack(rewards, dim=0),
@@ -184,7 +174,7 @@ class MiniGridDataset(TrajectoryDataset):
             "timesteps": torch.stack(timesteps, dim=0),
             "attention_mask": torch.stack(masks, dim=0),
             "dones": torch.stack(dones, dim=0),
-            # Encoder (full trajectory)
+
             "full_states": torch.stack(full_states, dim=0),
             "full_actions": torch.stack(full_actions, dim=0),
             "full_rewards": torch.stack(full_rewards, dim=0),
@@ -192,7 +182,8 @@ class MiniGridDataset(TrajectoryDataset):
             "full_timesteps": torch.stack(full_timesteps, dim=0),
             "full_attention_mask": torch.stack(full_masks, dim=0),
             "full_dones": torch.stack(full_dones, dim=0),
-            # Labels
+
+            "controls": torch.stack(controls, dim=0),  # [B, control_dim] float32
             "task_labels": torch.tensor(task_labels, dtype=torch.long),
         }
 
@@ -202,29 +193,48 @@ class MiniGridDataset(TrajectoryDataset):
 # =============================================================================
 
 def reparameterize(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-    """Reparameterization trick for VAE."""
     std = torch.exp(0.5 * logvar)
     eps = torch.randn_like(std)
     return mu + eps * std
 
 
-def kl_diag_gaussian(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-    """KL divergence between diagonal Gaussian and standard normal."""
-    return 0.5 * torch.sum(torch.exp(logvar) + mu**2 - 1.0 - logvar, dim=-1)
+def kl_q_p_diag(mu_q: torch.Tensor, logvar_q: torch.Tensor,
+                mu_p: torch.Tensor, logvar_p: torch.Tensor) -> torch.Tensor:
+    var_q = torch.exp(logvar_q)
+    var_p = torch.exp(logvar_p)
+    term = (var_q + (mu_q - mu_p).pow(2)) / (var_p + 1e-8)
+    kl = 0.5 * torch.sum(logvar_p - logvar_q + term - 1.0, dim=-1)
+    return kl  # [B]
+
+
+# =============================================================================
+# Conditional Prior on Controls
+# =============================================================================
+
+class ConditionalPrior(nn.Module):
+    def __init__(self, control_dim: int, latent_dim: int, hidden: int = 128):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(control_dim, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, hidden),
+            nn.GELU(),
+        )
+        self.to_mu = nn.Linear(hidden, latent_dim)
+        self.to_logvar = nn.Linear(hidden, latent_dim)
+        nn.init.constant_(self.to_logvar.bias, -3.0)
+
+    def forward(self, controls: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.mlp(controls)
+        return self.to_mu(h), self.to_logvar(h)
 
 
 # =============================================================================
 # Decision Transformer
+# Code taken from the Prompt-dt repository
 # =============================================================================
 
 class DecisionTransformer(nn.Module):
-    """
-    Decision Transformer that can be conditioned on style tokens.
-
-    Processes sequences as: [R_1, s_1, a_1, R_2, s_2, a_2, ...]
-    Optionally prepends style tokens at the beginning for conditioning.
-    """
-
     def __init__(
         self,
         state_dim: int,
@@ -241,18 +251,15 @@ class DecisionTransformer(nn.Module):
         self.hidden_size = hidden_size
         self.max_length = max_length
 
-        # GPT-2 transformer
         config = transformers.GPT2Config(vocab_size=1, n_embd=hidden_size, **kwargs)
         self.transformer = GPT2Model(config)
 
-        # Embedding layers
         self.embed_timestep = nn.Embedding(max_ep_len, hidden_size)
         self.embed_return = nn.Linear(1, hidden_size)
         self.embed_state = nn.Linear(state_dim, hidden_size)
-        self.embed_action = nn.Embedding(act_dim, hidden_size)  # Use Embedding for discrete actions
+        self.embed_action = nn.Embedding(act_dim, hidden_size)
         self.embed_ln = nn.LayerNorm(hidden_size)
 
-        # Prediction heads
         self.predict_state = nn.Linear(hidden_size, state_dim)
         self.predict_action = nn.Sequential(
             nn.Linear(hidden_size, act_dim),
@@ -262,39 +269,37 @@ class DecisionTransformer(nn.Module):
 
     def forward(
         self,
-        states: torch.Tensor,           # [B, T, state_dim]
-        actions: torch.Tensor,          # [B, T, act_dim] or [B, T, 1]
-        returns_to_go: torch.Tensor,    # [B, T, 1]
-        timesteps: torch.Tensor,        # [B, T]
-        attention_mask: torch.Tensor = None,  # [B, T]
-        style_tokens: torch.Tensor = None,    # [B, 3, H] optional
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        returns_to_go: torch.Tensor,
+        timesteps: torch.Tensor,
+        attention_mask: torch.Tensor = None,
+        style_tokens: torch.Tensor = None,
     ):
         batch_size, seq_length = states.shape[0], states.shape[1]
 
         if attention_mask is None:
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=states.device)
 
-        # Embed each modality
+        states = states.reshape(batch_size, seq_length, -1)
         state_embeddings = self.embed_state(states)
 
-        # Embed discrete actions directly
         if actions.ndim == 3:
             actions = actions.squeeze(-1)
-        actions = torch.clamp(actions.long(), 0, self.act_dim - 1)  # Handle padding
+        actions = torch.clamp(actions.long(), 0, self.act_dim - 1)
         action_embeddings = self.embed_action(actions)
 
         if returns_to_go.ndim == 2:
             returns_to_go = returns_to_go.unsqueeze(-1)
         returns_embeddings = self.embed_return(returns_to_go)
 
+        timesteps = timesteps.clamp(0, self.embed_timestep.num_embeddings - 1)
         time_embeddings = self.embed_timestep(timesteps)
 
-        # Add time embeddings
         state_embeddings = state_embeddings + time_embeddings
         action_embeddings = action_embeddings + time_embeddings
         returns_embeddings = returns_embeddings + time_embeddings
 
-        # Stack as (R_1, s_1, a_1, R_2, s_2, a_2, ...)
         stacked_inputs = torch.stack(
             (returns_embeddings, state_embeddings, action_embeddings), dim=1
         ).permute(0, 2, 1, 3).reshape(batch_size, 3 * seq_length, self.hidden_size)
@@ -304,98 +309,31 @@ class DecisionTransformer(nn.Module):
             (attention_mask, attention_mask, attention_mask), dim=1
         ).permute(0, 2, 1).reshape(batch_size, 3 * seq_length)
 
-        # Prepend style tokens if provided
         if style_tokens is not None:
             style_tokens_flat = style_tokens.reshape(batch_size, 3, self.hidden_size)
-            style_mask = torch.ones(
-                (batch_size, 3), dtype=stacked_attention_mask.dtype, device=stacked_attention_mask.device
-            )
+            style_mask = torch.ones((batch_size, 3), dtype=stacked_attention_mask.dtype, device=stacked_attention_mask.device)
             stacked_inputs = torch.cat([style_tokens_flat, stacked_inputs], dim=1)
             stacked_attention_mask = torch.cat([style_mask, stacked_attention_mask], dim=1)
 
-        # Run transformer
-        x = self.transformer(
-            inputs_embeds=stacked_inputs,
-            attention_mask=stacked_attention_mask,
-        )['last_hidden_state']
+        x = self.transformer(inputs_embeds=stacked_inputs, attention_mask=stacked_attention_mask)['last_hidden_state']
 
-        # Reshape and extract predictions
         if style_tokens is None:
             x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
         else:
             x = x.reshape(batch_size, -1, 3, self.hidden_size).permute(0, 2, 1, 3)
 
-        # Predictions from last seq_length timesteps
         return_preds = self.predict_return(x[:, 2])[:, -seq_length:, :]
         state_preds = self.predict_state(x[:, 2])[:, -seq_length:, :]
         action_preds = self.predict_action(x[:, 1])[:, -seq_length:, :]
 
         return state_preds, action_preds, return_preds
 
-    def get_action(
-        self,
-        states: torch.Tensor,
-        actions: torch.Tensor,
-        returns_to_go: torch.Tensor,
-        timesteps: torch.Tensor,
-        style_tokens: torch.Tensor = None,
-    ):
-        """Get action prediction for inference."""
-        states = states.reshape(1, -1, self.state_dim)
-        # For discrete actions, keep shape as [1, T, 1] or [1, T]
-        if actions.ndim == 3 and actions.shape[-1] == 1:
-            actions = actions.reshape(1, -1, 1)
-        else:
-            actions = actions.reshape(1, -1)
-        returns_to_go = returns_to_go.reshape(1, -1, 1)
-        timesteps = timesteps.reshape(1, -1)
-
-        if self.max_length is not None:
-            states = states[:, -self.max_length:]
-            actions = actions[:, -self.max_length:]
-            returns_to_go = returns_to_go[:, -self.max_length:]
-            timesteps = timesteps[:, -self.max_length:]
-
-            # Create attention mask (must be float, not long)
-            attention_mask = torch.cat([
-                torch.zeros(self.max_length - states.shape[1]),
-                torch.ones(states.shape[1])
-            ], dim=0).to(dtype=torch.float32, device=states.device).reshape(1, -1)
-
-            # Pad sequences
-            pad_len = self.max_length - states.shape[1]
-            states = torch.cat([torch.zeros((1, pad_len, self.state_dim), device=states.device), states], dim=1)
-            # For discrete actions, match the action tensor shape
-            action_pad_shape = (1, pad_len, actions.shape[-1]) if actions.ndim == 3 else (1, pad_len)
-            actions = torch.cat([torch.zeros(action_pad_shape, device=actions.device, dtype=actions.dtype), actions], dim=1)
-            returns_to_go = torch.cat([torch.zeros((1, pad_len, 1), device=returns_to_go.device), returns_to_go], dim=1)
-            timesteps = torch.cat([torch.zeros((1, pad_len), device=timesteps.device), timesteps], dim=1).long()
-        else:
-            attention_mask = None
-
-        _, action_preds, _ = self.forward(
-            states, actions, returns_to_go, timesteps,
-            attention_mask=attention_mask,
-            style_tokens=style_tokens,
-        )
-
-        return action_preds[0, -1]
-
 
 # =============================================================================
-# Style VAE + Decision Transformer
+# Style VAE + DT (Conditional Prior on Controls)
 # =============================================================================
 
 class StyleVAEPromptDT(nn.Module):
-    """
-    Style-conditioned Decision Transformer with VAE encoder.
-
-    Architecture:
-    1. Encoder: full trajectory (states, actions) -> latent style z
-    2. Latent -> 3 style tokens (R, S, A) prepended to DT
-    3. Decoder: Decision Transformer conditioned on style tokens
-    """
-
     def __init__(
         self,
         state_dim: int,
@@ -410,6 +348,9 @@ class StyleVAEPromptDT(nn.Module):
         max_ep_len: int = 4096,
         action_tanh: bool = True,
         beta: float = 0.1,
+        control_dim: int = 5,
+        prior_hidden: int = 128,
+        free_bits: float = 0.0,
         **dt_kwargs,
     ):
         super().__init__()
@@ -419,8 +360,8 @@ class StyleVAEPromptDT(nn.Module):
         self.beta = beta
         self.latent_dim = latent_dim
         self.hidden_size = hidden_size
+        self.free_bits = free_bits
 
-        # Decision Transformer (decoder)
         self.dt = DecisionTransformer(
             state_dim=state_dim,
             act_dim=act_dim,
@@ -431,7 +372,6 @@ class StyleVAEPromptDT(nn.Module):
             **dt_kwargs,
         )
 
-        # Trajectory encoder
         enc_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size,
             nhead=enc_heads,
@@ -444,88 +384,82 @@ class StyleVAEPromptDT(nn.Module):
         self.style_encoder = nn.TransformerEncoder(enc_layer, num_layers=enc_layers)
         self.enc_ln = nn.LayerNorm(hidden_size)
 
-        # VAE layers
         self.to_mu = nn.Linear(hidden_size, latent_dim)
         self.to_logvar = nn.Linear(hidden_size, latent_dim)
 
-        # Latent to style tokens
         self.z_to_style_tokens = nn.Sequential(
             nn.Linear(latent_dim, 3 * hidden_size),
-            nn.GELU(),
-            nn.Linear(3 * hidden_size, 3 * hidden_size),
-            nn.LayerNorm(3 * hidden_size),
+            # nn.GELU(),
+            # nn.Linear(3 * hidden_size, 3 * hidden_size),
+            # nn.LayerNorm(3 * hidden_size),
         )
+
+        self.prior = ConditionalPrior(control_dim=control_dim, latent_dim=latent_dim, hidden=prior_hidden)
 
     def encode_full_trajectory(
         self,
-        full_states: torch.Tensor,      # [B, S, state_dim]
-        full_actions: torch.Tensor,     # [B, S, act_dim]
-        full_timesteps: torch.Tensor,   # [B, S]
-        full_attn_mask: torch.Tensor,   # [B, S]
+        full_states: torch.Tensor,
+        full_actions: torch.Tensor,
+        full_timesteps: torch.Tensor,
+        full_attn_mask: torch.Tensor,
     ):
-        """Encode full trajectory into latent style z."""
-        batch_size, seq_len, _ = full_states.shape
+        batch_size, seq_len = full_states.shape[0], full_states.shape[1]
+        # full_states = full_states.reshape(batch_size, seq_len, -1)
 
-        # Embed states and actions
         s_emb = self.dt.embed_state(full_states)
 
-        # Embed discrete actions directly
         if full_actions.ndim == 3:
             full_actions = full_actions.squeeze(-1)
         full_actions = torch.clamp(full_actions.long(), 0, self.dt.act_dim - 1)
         a_emb = self.dt.embed_action(full_actions)
 
+        full_timesteps = full_timesteps.clamp(0, self.dt.embed_timestep.num_embeddings - 1)
         t_emb = self.dt.embed_timestep(full_timesteps)
-
-        # Add time embeddings
         s_emb = s_emb + t_emb
         a_emb = a_emb + t_emb
 
-        # Stack as [s_t, a_t] for each timestep
-        tokens = torch.stack((s_emb, a_emb), dim=1)  # [B, 2, S, H]
+        tokens = torch.stack((s_emb, a_emb), dim=1)  # [B,2,S,H]
         tokens = tokens.permute(0, 2, 1, 3).reshape(batch_size, 2 * seq_len, self.hidden_size)
 
-        # Token-level attention mask
         token_mask = torch.stack((full_attn_mask, full_attn_mask), dim=1)
         token_mask = token_mask.permute(0, 2, 1).reshape(batch_size, 2 * seq_len)
 
-        # Run encoder
-        src_key_padding_mask = (token_mask == 0)  # True = padding
+        src_key_padding_mask = (token_mask == 0)
         h = self.style_encoder(tokens, src_key_padding_mask=src_key_padding_mask)
         h = self.enc_ln(h)
 
-        # Masked mean pooling
         m = token_mask.unsqueeze(-1).to(h.dtype)
         denom = m.sum(dim=1).clamp_min(1.0)
         pooled = (h * m).sum(dim=1) / denom
 
-        # VAE parameters
         mu = self.to_mu(pooled)
         logvar = self.to_logvar(pooled)
         z = reparameterize(mu, logvar)
-
         return mu, logvar, z
 
     def latent_to_style_tokens(self, z: torch.Tensor) -> torch.Tensor:
-        """Convert latent z to style tokens [B, 3, H]."""
         batch_size = z.size(0)
         x = self.z_to_style_tokens(z)
         return x.view(batch_size, 3, self.hidden_size)
 
+    def sample_z_from_prior(self, controls: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+        mu_p, logvar_p = self.prior(controls)
+        if deterministic:
+            return mu_p
+        return reparameterize(mu_p, logvar_p)
+
     def forward(
         self,
-        # Encoder inputs
         full_states: torch.Tensor,
         full_actions: torch.Tensor,
         full_timesteps: torch.Tensor,
         full_attention_mask: torch.Tensor,
-        # Decoder inputs
+        controls: torch.Tensor,
         states: torch.Tensor,
         actions: torch.Tensor,
         returns_to_go: torch.Tensor,
         timesteps: torch.Tensor,
         attention_mask: torch.Tensor,
-        # Unused but kept for compatibility
         full_returns_to_go: torch.Tensor = None,
         rewards: torch.Tensor = None,
         prompt=None,
@@ -534,13 +468,11 @@ class StyleVAEPromptDT(nn.Module):
         if beta is None:
             beta = self.beta
 
-        # Encode trajectory to style
-        mu, logvar, z = self.encode_full_trajectory(
-            full_states, full_actions, full_timesteps, full_attention_mask
-        )
+        mu_q, logvar_q, z = self.encode_full_trajectory(full_states, full_actions, full_timesteps, full_attention_mask)
+        mu_p, logvar_p = self.prior(controls)
+
         style_tokens = self.latent_to_style_tokens(z)
 
-        # Run DT conditioned on style
         state_preds, action_preds, return_preds = self.dt(
             states=states,
             actions=actions,
@@ -550,239 +482,25 @@ class StyleVAEPromptDT(nn.Module):
             style_tokens=style_tokens,
         )
 
-        # Compute KL loss
-        kl = kl_diag_gaussian(mu, logvar).mean()
-        kl_loss = beta * kl
+        kl_per = kl_q_p_diag(mu_q, logvar_q, mu_p, logvar_p)
+        if self.free_bits > 0:
+            kl_per = torch.clamp(kl_per, min=self.free_bits)
+        kl_loss = beta * kl_per.mean()
 
         return {
             "state_preds": state_preds,
             "action_preds": action_preds,
             "return_preds": return_preds,
-            "mu": mu,
-            "logvar": logvar,
+            "mu": mu_q,
+            "logvar": logvar_q,
             "z": z,
+            "mu_prior": mu_p,
+            "logvar_prior": logvar_p,
             "kl_loss": kl_loss,
         }
 
-
 # =============================================================================
-# Online Evaluation
-# =============================================================================
-
-def evaluate_online(
-    model: StyleVAEPromptDT,
-    dataset: MiniGridDataset,
-    num_styles: int = 3,
-    num_episodes_per_style: int = 10,
-    max_ep_len: int = 100,
-    device: str = "cpu",
-    initial_rtg: float = 1.0,
-    env_kwargs: dict = None,
-    max_context: int = None,
-):
-    """
-    Evaluate the DT online for each style.
-
-    For each style:
-    1. Sample a random trajectory from that style
-    2. Encode it to get z
-    3. Run DT conditioned on z in the environment
-    4. Return mean episode return for each style
-    """
-    model.eval()
-    # Match eval rollout context to the training window length, so the DT never
-    # has to extrapolate past the sequence lengths it was trained on.
-    if max_context is None:
-        max_context = model.dt.max_length
-
-    if env_kwargs is None:
-        env_kwargs = {}
-
-    # Map style IDs to style names
-    style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
-
-    # Results: {style_id: [returns]}
-    results = {style_id: [] for style_id in range(num_styles)}
-    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
-    success = {style_id: [] for style_id in range(num_styles)}
-
-    with torch.no_grad():
-        for style_id in range(num_styles):
-            # Find trajectories of this style
-            style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
-            if len(style_indices) == 0:
-                print(f"Warning: No trajectories found for style {style_id}")
-                continue
-
-            # Sample a random trajectory from this style
-            traj_idx = random.choice(style_indices)
-
-            # Get full trajectory and encode it
-            full_s, full_a, full_r, full_rtg, full_d, full_ti, full_m = dataset.get_full_traj(traj_idx)
-
-            full_s = full_s.unsqueeze(0).to(device)
-            full_a = full_a.unsqueeze(0).to(device)
-            full_ti = full_ti.unsqueeze(0).to(device)
-            full_m = full_m.unsqueeze(0).to(device)
-
-            # Encode to get z
-            mu, logvar, z = model.encode_full_trajectory(
-                full_states=full_s,
-                full_actions=full_a,
-                full_timesteps=full_ti,
-                full_attn_mask=full_m,
-            )
-
-            # Convert z to style tokens
-            style_tokens = model.latent_to_style_tokens(z)  # [1, 3, H]
-
-            # Run episodes in the environment
-            for ep in range(num_episodes_per_style):
-                # Create environment for this style
-                env = MiniGridThreeStyles(
-                    target_style=style_names[style_id],
-                    target_bonus=1.0,
-                    non_target_penalty=-1.0,
-                    easy_env=False,
-                    agent_view_size=3,
-                    **env_kwargs
-                )
-
-                obs, _ = env.reset(seed=42 + ep)
-
-                # Initialize context - extract only object index channel (channel 0)
-                state = torch.from_numpy(obs['image'][:, :, 0].flatten()).float().to(device)
-                state_mean = torch.tensor(dataset.state_mean, device=device, dtype=torch.float32)
-                state_std = torch.tensor(dataset.state_std, device=device, dtype=torch.float32)
-                state = (state - state_mean) / state_std
-
-                states = state.reshape(1, 1, -1)  # [1, 1, state_dim]
-                # Use action 0 as padding token, matching the sequence length of states
-                actions = torch.zeros((1, 1, 1), dtype=torch.long, device=device)  # [1, 1, 1]
-                rtgs = torch.tensor([[[initial_rtg]]], dtype=torch.float32, device=device)  # [1, 1, 1]
-                timesteps = torch.tensor([[0]], dtype=torch.long, device=device)  # [1, 1]
-
-                episode_return = 0
-                done = False
-                t = 0
-
-                while not done and t < max_ep_len:
-                    # Get action from DT (use forward directly without padding logic)
-                    with torch.no_grad():
-                        # Create attention mask - all ones (attend to all positions)
-                        attn_mask = torch.ones((1, states.shape[1]), dtype=torch.float32, device=device)
-
-                        _, action_preds, _ = model.dt.forward(
-                            states=states,
-                            actions=actions,
-                            returns_to_go=rtgs,
-                            timesteps=timesteps,
-                            attention_mask=attn_mask,
-                            style_tokens=style_tokens,
-                        )
-
-                    action = torch.argmax(action_preds[:, -1], dim=-1).item()
-
-                    # Step environment
-                    next_obs, reward, terminated, truncated, info = env.step(action)
-                    done = terminated or truncated
-
-                    episode_return += reward
-                    t += 1
-
-                    if not done:
-                        # Update context - extract only object index channel (channel 0)
-                        next_state = torch.from_numpy(next_obs['image'][:, :, 0].flatten()).float().to(device)
-                        next_state = (next_state - state_mean) / state_std
-
-                        states = torch.cat([states, next_state.reshape(1, 1, -1)], dim=1)
-                        actions = torch.cat([actions, torch.tensor([[[action]]], dtype=torch.long, device=device)], dim=1)
-
-                        # Update RTG
-                        next_rtg = rtgs[:, -1:, :] - reward
-                        rtgs = torch.cat([rtgs, next_rtg], dim=1)
-
-                        timesteps = torch.cat([timesteps, torch.tensor([[t]], dtype=torch.long, device=device)], dim=1)
-
-                        # keep only last max_context steps
-                        if max_context is not None and states.shape[1] > max_context:
-                            states = states[:, -max_context:]
-                            actions = actions[:, -max_context:]
-                            rtgs = rtgs[:, -max_context:]
-                            timesteps = timesteps[:, -max_context:]
-
-                results[style_id].append(episode_return)
-                # An episode succeeds only if the style the env actually
-                # registered matches the requested target style.
-                achieved = info.get("achieved_style")
-                if achieved is None and isinstance(info.get("episode_summary"), dict):
-                    achieved = info["episode_summary"].get("achieved_style")
-                success[style_id].append(
-                    1.0 if achieved == style_names[style_id] else 0.0
-                )
-                env.close()
-
-            print(
-                f"Style {style_id} ({style_names[style_id]}): "
-                f"success = {np.mean(success[style_id]):.2f} "
-                f"| mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f}"
-            )
-
-    model.train()
-    return results, success
-
-
-# =============================================================================
-# Plotting
-# =============================================================================
-
-def plot_eval_results(eval_history: dict, save_path: str = "eval_results.png"):
-    """Plot the online evaluation results for each style over training.
-
-    Primary plot is the per-style success rate (achieved_style == target_style),
-    which is far less noisy than mean return. A companion `*_return.png` plot of
-    mean return is also saved when return history is available.
-    """
-    epochs = eval_history["epochs"]
-    style_names = {0: "Bypass", 1: "Weapon", 2: "Camouflage"}
-
-    # Success-rate plot (primary metric)
-    plt.figure(figsize=(10, 6))
-    for style_id in range(3):
-        rates = eval_history[f"style_{style_id}"]
-        plt.plot(epochs, rates, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
-
-    plt.xlabel("Epoch", fontsize=12)
-    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
-    plt.ylim(-0.02, 1.02)
-    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
-    plt.legend(fontsize=10)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    print(f"Saved combined evaluation plot to {save_path}")
-    plt.close()
-
-    # Companion return plot, if returns were tracked
-    if any(f"style_{s}_return" in eval_history for s in range(3)):
-        ret_path = save_path.replace(".png", "_return.png")
-        plt.figure(figsize=(10, 6))
-        for style_id in range(3):
-            returns = eval_history.get(f"style_{style_id}_return", [])
-            plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
-        plt.xlabel("Epoch", fontsize=12)
-        plt.ylabel("Mean Episode Return", fontsize=12)
-        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
-        plt.legend(fontsize=10)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(ret_path, dpi=150)
-        print(f"Saved return evaluation plot to {ret_path}")
-        plt.close()
-
-
-# =============================================================================
-# Training
+# Training (minimal changes: pass controls)
 # =============================================================================
 
 def train_style_prompt_dt(
@@ -798,9 +516,9 @@ def train_style_prompt_dt(
     eval_every: int = 10,
     eval_episodes_per_style: int = 50,
     max_ep_len: int = 100,
-    initial_rtg: float = 1.0,
+    initial_rtg: float = 2.5,
+    beta_warmup_epochs: int = 0,
 ):
-    """Train the Style-VAE + Decision Transformer model."""
     model.to(device)
     model.train()
     optimizer = AdamW(model.parameters(), lr=lr)
@@ -808,18 +526,22 @@ def train_style_prompt_dt(
     # Track evaluation results. `style_{id}` holds the success rate (primary
     # metric, the curve we plot); `style_{id}_return` keeps the mean return.
     eval_history = {"epochs": []}
-    for style_id in range(3):
+    for style_id in range(len(style_names)):
         eval_history[f"style_{style_id}"] = []
         eval_history[f"style_{style_id}_return"] = []
 
     for epoch in range(num_epochs):
+        if beta_warmup_epochs > 0:
+            beta = model.beta * min(1.0, (epoch + 1) / beta_warmup_epochs)
+        else:
+            beta = model.beta
+
         running_loss = 0.0
         running_bc = 0.0
         running_kl = 0.0
         n_batches = 0
 
         for batch_idx, batch in enumerate(dataloader):
-            # Move batch to device
             states = batch["states"].to(device)
             actions = batch["actions"].to(device)
             rtgs = batch["returns_to_go"].to(device)
@@ -831,59 +553,53 @@ def train_style_prompt_dt(
             full_timesteps = batch["full_timesteps"].to(device)
             full_attn_mask = batch["full_attention_mask"].to(device)
 
-            # Forward pass
+            controls = batch["controls"].to(device)  # [B, control_dim]
+
             out = model(
                 full_states=full_states,
                 full_actions=full_actions,
                 full_timesteps=full_timesteps,
                 full_attention_mask=full_attn_mask,
+                controls=controls,
                 states=states,
                 actions=actions,
                 returns_to_go=rtgs,
                 timesteps=timesteps,
                 attention_mask=attn_mask,
+                beta=beta,
             )
 
-            action_preds = out["action_preds"]  # [B, K, num_classes]
+            action_preds = out["action_preds"]
             kl_loss = out["kl_loss"]
 
-            # Action BC loss (cross-entropy)
             if action_loss_weight > 0:
-                batch_size, seq_len, num_classes = action_preds.shape
-
-                # Prepare actions for cross-entropy
+                B, T, C = action_preds.shape
                 if actions.ndim == 3:
-                    actions = actions.squeeze(-1)
-                actions = torch.clamp(actions.long(), 0, num_classes - 1)
+                    actions_ce = actions.squeeze(-1)
+                else:
+                    actions_ce = actions
+                actions_ce = torch.clamp(actions_ce.long(), 0, C - 1)
 
-                # Compute masked cross-entropy loss
-                action_preds_flat = action_preds.reshape(batch_size * seq_len, num_classes)
-                actions_flat = actions.reshape(batch_size * seq_len)
+                logits = action_preds.reshape(B * T, C)
+                targets = actions_ce.reshape(B * T)
 
-                ce_loss = torch.nn.functional.cross_entropy(
-                    action_preds_flat, actions_flat, reduction='none'
-                ).reshape(batch_size, seq_len)
-
-                # Apply mask
-                valid_mask = attn_mask.to(ce_loss.dtype)
-                action_bc = (ce_loss * valid_mask).sum()
+                ce = torch.nn.functional.cross_entropy(logits, targets, reduction="none").reshape(B, T)
+                valid = attn_mask.to(ce.dtype)
+                action_bc = (ce * valid).sum()
             else:
                 action_bc = torch.zeros((), device=device)
 
-            # Total loss
             loss = action_loss_weight * action_bc + kl_loss
 
-            # Backward pass
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             if grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
-            # Logging
-            running_loss += loss.item()
-            running_bc += action_bc.item()
-            running_kl += kl_loss.item()
+            running_loss += float(loss.item())
+            running_bc += float(action_bc.item())
+            running_kl += float(kl_loss.item())
             n_batches += 1
 
             if log_every > 0 and (batch_idx + 1) % log_every == 0:
@@ -892,31 +608,34 @@ def train_style_prompt_dt(
                     f"| loss={loss.item():.6f} bc={action_bc.item():.6f} kl={kl_loss.item():.6f}"
                 )
 
-        # End of epoch
         print(
             f"===> Epoch {epoch+1}/{num_epochs} "
             f"| avg_loss={running_loss/n_batches:.6f} "
             f"| avg_bc={running_bc/n_batches:.6f} "
-            f"| avg_kl={running_kl/n_batches:.6f}"
+            f"| avg_kl={running_kl/n_batches:.6f} "
+            f"| beta={beta:.6f}"
         )
 
         # Online evaluation every eval_every epochs
         if eval_every > 0 and (epoch + 1) % eval_every == 0:
-            print(f"\n=== Online Evaluation at Epoch {epoch+1} ===")
-            eval_results, eval_success = evaluate_online(
+            print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
+            eval_results, eval_success = evaluate_online_controls(
                 model=model,
                 dataset=dataloader.dataset,
-                num_styles=3,
+                num_styles=len(style_names),
                 num_episodes_per_style=eval_episodes_per_style,
                 max_ep_len=max_ep_len,
                 device=device,
                 initial_rtg=initial_rtg,
+                env_kwargs=None,
+                deterministic_prior=False,
                 max_context=None,  # match the training window length
             )
 
+
             # Record results: success rate (primary) and mean return.
             eval_history["epochs"].append(epoch + 1)
-            for style_id in range(3):
+            for style_id in range(len(style_names)):
                 success_rate = np.mean(eval_success[style_id]) if eval_success[style_id] else 0.0
                 mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
                 eval_history[f"style_{style_id}"].append(success_rate)
@@ -924,15 +643,265 @@ def train_style_prompt_dt(
 
             print()
 
-        if save_path is not None:
+        if save_path is not None and (epoch + 1) % eval_every == 0:
             torch.save(model.state_dict(), save_path)
             print(f"Saved model to {save_path}")
 
     # Plot evaluation results
     if eval_history["epochs"]:
-        plot_eval_results(eval_history, save_path="plots/eval_results.png")
+        plot_eval_results(eval_history, save_path="plots/eval_results_style_dt.png")
 
     return model
+
+
+# =============================================================================
+# Online Evaluation
+# =============================================================================
+
+def evaluate_online_controls(
+    model: StyleVAEPromptDT,
+    dataset: MiniGridDataset,
+    num_styles: int = 3,
+    num_episodes_per_style: int = 10,
+    max_ep_len: int = 100,
+    device: str = "cpu",
+    initial_rtg: float = 2.5,
+    env_kwargs: dict = None,
+    deterministic_prior: bool = True,
+    max_context: int = None,
+):
+    """
+    Online evaluation for the *controls-conditioned prior* model.
+
+    For each style (only for evaluation bookkeeping):
+      1) Choose a control vector c (designer controls)
+      2) Sample z ~ p(z|c) using the learned prior (NO reference trajectory needed)
+      3) Convert z -> style_tokens
+      4) Rollout DT conditioned on style_tokens
+
+    Returns:
+      results: dict {style_id: [episode_returns]}
+    """
+    model.eval()
+    # Match eval rollout context to the training window length, so the DT never
+    # has to extrapolate past the sequence lengths it was trained on.
+    if max_context is None:
+        max_context = model.dt.max_length
+    if env_kwargs is None:
+        env_kwargs = {}
+        env_kwargs["max_steps"] = 100
+
+    # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
+    # Fallback when dataset has no controls stored (should not happen with new datasets).
+    # fallback_style_to_controls = {
+    #     0: np.array([0.67, 0.01, 0.53, 0.53, 0.82], dtype=np.float32),  # bypass
+    #     1: np.array([0.92, 0.51, 0.00, 0.00, 0.59], dtype=np.float32),  # weapon
+    #     2: np.array([0.92, 0.53, 1.00, 0.63, 0.74], dtype=np.float32),  # camouflage
+    # }
+    if len(style_names) != 3:
+        num_styles = len(style_names)
+    results = {style_id: [] for style_id in range(num_styles)}
+    # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
+    success = {style_id: [] for style_id in range(num_styles)}
+
+    # state normalization tensors
+    state_mean = torch.tensor(dataset.state_mean, device=device, dtype=torch.float32)
+    state_std = torch.tensor(dataset.state_std, device=device, dtype=torch.float32)
+
+    with torch.no_grad():
+        for style_id in range(num_styles):
+            c = None
+
+            # if hasattr(dataset, "controls") and dataset.controls is not None:
+            # sample one trajectory index of this style and take its controls
+            style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
+            if len(style_indices) > 0:
+                traj_idx = random.choice(style_indices)
+                c = dataset.controls[traj_idx]  # numpy array [control_dim]
+                c = np.asarray(c, dtype=np.float32)
+
+            # if c is None:
+            #     c = fallback_style_to_controls[style_id]
+
+            controls = torch.tensor(c, dtype=torch.float32, device=device).unsqueeze(0)
+
+            # sample z from prior given controls
+            z = model.sample_z_from_prior(controls, deterministic=deterministic_prior)
+            style_tokens = model.latent_to_style_tokens(z)
+
+            # rollout episodes
+            for ep in range(num_episodes_per_style):
+                if "portal" in style_names.values():
+                    env = MiniGridFourStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        eval_mode=True,   # zero PPO-only shaping -> returns match offline data
+                        **env_kwargs,
+                    )
+                elif len(style_names) == 3:
+                    env = MiniGridThreeStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        easy_env=False,
+                        agent_view_size=3,
+                        randomize_layout=True,
+                        **env_kwargs
+                    )
+                else:
+                    env = MiniGridMultiStyles(
+                        target_style=style_names[style_id],
+                        target_bonus=1.0,
+                        non_target_penalty=-1.0,
+                        agent_view_size=3,
+                        free_item_placement=True,
+                        **env_kwargs,
+                    )
+
+                obs, _ = env.reset(seed=42 + ep)
+                # env.render()
+
+                # state: object index channel 0, flattened, normalized like training
+
+                if len(style_names) == 3:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(device)
+                else:
+                    state = torch.from_numpy(
+                        obs["image"][:, :, 0].flatten()
+                    ).float().to(device)
+                state = (state - state_mean.flatten()) / state_std.flatten()
+
+                states = state.reshape(1, 1, -1)
+                actions = torch.zeros((1, 1, 1), dtype=torch.long, device=device)
+                rtgs = torch.tensor([[[initial_rtg]]], dtype=torch.float32, device=device)
+                timesteps = torch.tensor([[0]], dtype=torch.long, device=device)
+
+                episode_return = 0.0
+                done = False
+                t = 0
+
+                while not done and t < max_ep_len:
+                    attn_mask = torch.ones((1, states.shape[1]), dtype=torch.float32, device=device)
+
+                    _, action_preds, _ = model.dt.forward(
+                        states=states,
+                        actions=actions,
+                        returns_to_go=rtgs,
+                        timesteps=timesteps,
+                        attention_mask=attn_mask,
+                        style_tokens=style_tokens,
+                    )
+
+                    action = torch.argmax(action_preds[:, -1], dim=-1).item()
+
+                    next_obs, reward, terminated, truncated, info = env.step(action)
+                    done = terminated or truncated
+
+                    episode_return += float(reward)
+                    t += 1
+
+                    if not done:
+                        if len(style_names) == 3:
+                            next_state = torch.from_numpy(next_obs["image"][:, :, 0].flatten()).float().to(device)
+                        else:
+                            next_state = torch.from_numpy(next_obs["image"][:, :, 0].flatten()).float().to(device)
+
+                        next_state = (next_state - state_mean.flatten()) / state_std.flatten()
+
+                        states = torch.cat([states, next_state.reshape(1, 1, -1)], dim=1)
+                        actions = torch.cat(
+                            [actions, torch.tensor([[[action]]], dtype=torch.long, device=device)],
+                            dim=1,
+                        )
+
+                        next_rtg = rtgs[:, -1:, :] - reward
+                        rtgs = torch.cat([rtgs, next_rtg], dim=1)
+
+                        timesteps = torch.cat(
+                            [timesteps, torch.tensor([[t]], dtype=torch.long, device=device)],
+                            dim=1,
+                        )
+
+                        # keep only last max_context steps
+                        if max_context is not None and states.shape[1] > max_context:
+                            states = states[:, -max_context:]
+                            actions = actions[:, -max_context:]
+                            rtgs = rtgs[:, -max_context:]
+                            timesteps = timesteps[:, -max_context:]
+
+                results[style_id].append(episode_return)
+                # An episode succeeds only if it reached the goal AND the style
+                # the env actually registered matches the requested target style.
+                achieved = info.get("achieved_style")
+                if achieved is None and isinstance(info.get("episode_summary"), dict):
+                    achieved = info["episode_summary"].get("achieved_style")
+                success[style_id].append(
+                    1.0 if achieved == style_names[style_id] else 0.0
+                )
+                env.close()
+
+            print(
+                f"[controls->prior] Style {style_id} ({style_names[style_id]}): "
+                f"success = {np.mean(success[style_id]):.2f} "
+                f"| mean return = {np.mean(results[style_id]):.3f} ± {np.std(results[style_id]):.3f} "
+                f"| deterministic_prior={deterministic_prior}"
+            )
+
+    model.train()
+    return results, success
+
+
+# =============================================================================
+# Plotting
+# =============================================================================
+
+def plot_eval_results(eval_history: dict, save_path: str = "style_dt_eval_results.png"):
+    """Plot the online evaluation results for each style over training.
+
+    Primary plot is the per-style success rate (achieved_style == target_style),
+    which is far less noisy than mean return. A companion `*_return.png` plot of
+    mean return is also saved when return history is available.
+    """
+    epochs = eval_history["epochs"]
+
+    # Success-rate plot (primary metric)
+    plt.figure(figsize=(10, 6))
+    for style_id in range(len(style_names)):
+        rates = eval_history[f"style_{style_id}"]
+        plt.plot(epochs, rates, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+
+    plt.xlabel("Epoch", fontsize=12)
+    plt.ylabel("Success Rate (achieved == target)", fontsize=12)
+    plt.ylim(-0.02, 1.02)
+    plt.title("Online Evaluation: Success Rate by Style", fontsize=14)
+    plt.legend(fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    print(f"Saved combined evaluation plot to {save_path}")
+    plt.close()
+
+    # Companion return plot, if returns were tracked
+    if any(f"style_{s}_return" in eval_history for s in range(len(style_names))):
+        ret_path = save_path.replace(".png", "_return.png")
+        plt.figure(figsize=(10, 6))
+        for style_id in range(len(style_names)):
+            returns = eval_history.get(f"style_{style_id}_return", [])
+            plt.plot(epochs, returns, marker='o', label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Mean Episode Return", fontsize=12)
+        plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(ret_path, dpi=150)
+        print(f"Saved return evaluation plot to {ret_path}")
+        plt.close()
 
 
 # =============================================================================
@@ -940,85 +909,86 @@ def train_style_prompt_dt(
 # =============================================================================
 
 if __name__ == "__main__":
-    device = "cpu" # "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Create dataset
+    # Training window must span the full trajectory: the styles require acting on
+    # an earlier action (e.g. weapon pickup) ~13 steps before its use (toggle),
+    # and "carrying" is not in the observation — the only memory channel is the
+    # action history inside the context window. Trajectories are ~30-39 steps and
+    # the pickup->toggle gap reaches 31, so an 8-step window can never contain
+    # both, which is why non-bypass styles never improve. 40 covers every traj.
+    max_len = 8
+    control_dim = 3
     dataset_params = {
-        "sampling": False,
+        "sampling": True,
         "index_channel_only": True,
-        "state_normalization_factor": 1, #9,
-        "action_normalization_factor": 1, #6,
+        "state_normalization_factor": 1,
+        "action_normalization_factor": 1,
+        "max_len": max_len,
+        "control_dim": control_dim, #5,
     }
     dataset = MiniGridDataset(trajectory_paths=paths, **dataset_params)
     loader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=dataset.collate_fn)
 
-    # Create model
+    # The timestep embedding (embed_timestep) is sized by max_ep_len and is NOT
+    # clamped, so it must cover the longest trajectory in the data. Newer data
+    # collected with max_steps=100 has trajectories up to ~128 steps, which
+    # overflowed the old hard-coded 100. Derive it from the data (+buffer) so it
+    # auto-adjusts if max_steps changes again.
+    model_max_ep_len = dataset.max_ep_len + 1
+    print(f"max trajectory length in data = {dataset.max_ep_len} -> max_ep_len = {model_max_ep_len}")
+
     model = StyleVAEPromptDT(
         state_dim=9,
         act_dim=7,
         hidden_size=128,
         latent_dim=16,
-        max_length=20,
-        max_ep_len=100,
+        max_length=max_len,
+        max_ep_len=model_max_ep_len,
         action_tanh=False,
         beta=0.0085,
+        control_dim=control_dim,
+        prior_hidden=128,
+        free_bits=0.0,
         n_layer=4,
         n_head=8,
     )
 
-    # Train
     train_style_prompt_dt(
         model=model,
         dataloader=loader,
-        num_epochs=100,
+        num_epochs=150,
         device=device,
         lr=1e-3,
         grad_clip=1.0,
         action_loss_weight=1.0,
         log_every=10,
-        save_path="style_prompt_dt_minigrid.pth",
-        eval_every=10,
-        eval_episodes_per_style=50,
-        max_ep_len=100,
-        initial_rtg=1.0,
+        save_path="trained_models/style_prompt_dt_minigrid_controls_condprior.pth",
+        beta_warmup_epochs=0
     )
 
-    # Evaluate: extract latents and visualize
+    # Latent visualization (still uses encoder z)
     model.eval()
     Z, y_true = [], []
-
     with torch.no_grad():
         for batch in loader:
-            states = batch["states"].to(device)
-            actions = batch["actions"].to(device)
-            rtgs = batch["returns_to_go"].to(device)
-            timesteps = batch["timesteps"].to(device)
-            attn_mask = batch["attention_mask"].to(device)
-
-            full_states = batch["full_states"].to(device)
-            full_actions = batch["full_actions"].to(device)
-            full_timesteps = batch["full_timesteps"].to(device)
-            full_attn_mask = batch["full_attention_mask"].to(device)
-
             out = model(
-                full_states=full_states,
-                full_actions=full_actions,
-                full_timesteps=full_timesteps,
-                full_attention_mask=full_attn_mask,
-                states=states,
-                actions=actions,
-                returns_to_go=rtgs,
-                timesteps=timesteps,
-                attention_mask=attn_mask,
+                full_states=batch["full_states"].to(device),
+                full_actions=batch["full_actions"].to(device),
+                full_timesteps=batch["full_timesteps"].to(device),
+                full_attention_mask=batch["full_attention_mask"].to(device),
+                controls=batch["controls"].to(device),
+                states=batch["states"].to(device),
+                actions=batch["actions"].to(device),
+                returns_to_go=batch["returns_to_go"].to(device),
+                timesteps=batch["timesteps"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
             )
-
             Z.append(out["z"].cpu())
             y_true.extend(batch["task_labels"].cpu().numpy().tolist())
 
-    # Cluster and plot
     Z = torch.cat(Z, 0).cpu().numpy()
-    predicted_labels, _ = cluster_latents(Z, 3)
-
+    predicted_labels, _ = cluster_latents(Z, len(style_names))
     plot_embeddings(gtruth=predicted_labels, Z=Z, label_name="task_predicted")
     plot_embeddings(gtruth=y_true, Z=Z, label_name="task_ground_truth")

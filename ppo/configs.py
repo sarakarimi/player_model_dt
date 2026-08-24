@@ -19,10 +19,10 @@ from minigrid.wrappers import (
 from gymnasium import spaces
 from minigrid.wrappers import ObservationWrapper
 
-from envs.four_style_env import MiniGridFourStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
 # from envs.multi_goal_minigrid import MultiGoalEnv
-# from envs.three_style_env import MiniGridThreeStyles
-from envs.multi_style_env import MiniGridMultiStyles
+# from envs.three_style_minigrid_env import MiniGridThreeStyles
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
 
 
 # from envs.double_goal_minigrid import DoubleGoalEnv

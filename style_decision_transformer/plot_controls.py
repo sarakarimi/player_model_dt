@@ -6,14 +6,14 @@ Produces two figures saved alongside this script:
   controls_heatmap.png – mean ± std heatmap (styles × dims)
 
 Run from the repo root:
-    python trajectory_embedding/style_dec_vae/transformer/style_pdt_vae/plot_controls.py
+    python style_decision_transformer/plot_controls.py
 """
 
 import os
 import sys
 
 # Add repo root to path so all project modules resolve correctly
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
@@ -21,8 +21,8 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
 
-from style_decision_transformer.style_pdt_vae.paths import paths
-from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer.paths import paths
+from style_decision_transformer.pdt_vae_with_prior import (
     MiniGridDataset,
 )
 

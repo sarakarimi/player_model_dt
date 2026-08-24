@@ -3,9 +3,9 @@ from minigrid.minigrid_env import MiniGridEnv
 from minigrid.wrappers import FullyObsWrapper, OneHotPartialObsWrapper, ViewSizeWrapper
 import numpy as np
 
-from envs.four_style_env import MiniGridFourStyles
-from envs.multi_style_env import MiniGridMultiStyles
-# from envs.three_style_env import MiniGridThreeStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
+# from envs.three_style_minigrid_env import MiniGridThreeStyles
 from configs import EnvironmentConfig
 
 

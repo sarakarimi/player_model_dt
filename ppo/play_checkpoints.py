@@ -22,7 +22,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from envs.multi_style_env import MiniGridMultiStyles
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
 
 # ---- config -----------------------------------------------------------------
 CKPT_GLOB = os.path.join(os.path.dirname(__file__), "..", "trained_models", "*.pt")

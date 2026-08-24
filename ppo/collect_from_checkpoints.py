@@ -35,7 +35,7 @@ import sys
 import time
 
 # The ppo package imports its siblings by bare module name (`from agent import ...`)
-# while make_env imports `from envs.multi_style_env import ...`, so BOTH the repo
+# while make_env imports `from envs.multi_style_minigrid_env import ...`, so BOTH the repo
 # root and the ppo/ dir need to be on sys.path regardless of how we're launched.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(_THIS_DIR)
@@ -54,7 +54,7 @@ from minigrid.wrappers import (  # noqa: E402
 
 from agent import get_agent  # noqa: E402
 from configs import EnvironmentConfig, OnlineTrainConfig, RunConfig  # noqa: E402
-from envs.multi_style_env import MiniGridMultiStyles  # noqa: E402
+from envs.multi_style_minigrid_env import MiniGridMultiStyles  # noqa: E402
 from memory import Memory  # noqa: E402
 from trajectory_writer import TrajectoryWriter  # noqa: E402
 

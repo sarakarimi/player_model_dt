@@ -1,23 +1,15 @@
 """
-Control-Conditioned Decision Transformer (ControlDT) for the MiniGrid
-three-style env.
+Prompting Decision Transformer (PromptDT) for the MiniGrid three-style env.
 
-The model is conditioned on a 5-dim designer control vector that is embedded
-as style tokens prepended to the (rtg, state, action) sequence.  This is the
-"oracle control" baseline: it receives the intended behavioral parameters
-directly, without a reference trajectory or a VAE encoder.
+A full reference trajectory (the "prompt") is prepended to the current context
+window before being fed to the transformer.  The model attends to both and is
+trained with a standard BC loss on the current-window actions only.
 
-Architecture vs. pdt_vae_with_prior.py:
-  - Same GPT2 backbone and DT decoder
-  - Same 3-token style-token prepending scheme
-  - Control vector → 3 style tokens via a 2-layer MLP (mirrors z_to_style_tokens)
-  - No encoder, no VAE, no KL loss — BC loss only
+At inference, pick any trajectory from the dataset for the desired style and
+pass it as the prompt — no encoder or learned latent required.
 
-Mirrors prompt_dt.py in dataset, training loop, and evaluation structure for
-direct comparison.
-
-Control vector dims (same as pdt_vae_with_prior.py):
-    [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
+Mirrors pdt_vae_with_prior.py exactly in backbone, dataset, training loop, and
+evaluation structure so the two can be compared directly.
 """
 
 import random
@@ -32,38 +24,34 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
-from envs.multi_style_env import MiniGridMultiStyles
-from envs.three_style_env import MiniGridThreeStyles
-from envs.four_style_env import MiniGridFourStyles
-from style_decision_transformer.style_pdt_vae.paths import paths
-from style_decision_transformer.style_pdt_vae.trajectory_gpt2 import GPT2Model
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
+from envs.three_style_minigrid_env import MiniGridThreeStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
+from style_decision_transformer.paths import paths
+from style_decision_transformer.trajectory_gpt2 import GPT2Model
 
-
-# ---------------------------------------------------------------------------
-# Control vector metadata
-# ---------------------------------------------------------------------------
-
-# CONTROL_NAMES = ["risk_tolerance", "resource_pref", "commitment"] #, "stealth_pref", "safety_pref", "commitment"]
-CONTROL_NAMES = ["risk_taking", "stealth_exposure", "route_directness"] #, "stealth_pref", "safety_pref", "commitment"]
-
-CONTROL_DIM   = len(CONTROL_NAMES)
-
-# STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"}
-STYLE_NAMES = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
-
-
+# style_names = {0: "bypass", 1: "weapon", 2: "camouflage"}
+style_names = {0: "portal", 1: "weapon", 2: "camouflage", 3: "daredevil"}  # order matches paths.py (four-style)
 
 # =============================================================================
 # Dataset
 # =============================================================================
 
-class ControlDataset(TrajectoryDataset):
+class PromptDataset(TrajectoryDataset):
     """
-    TrajectoryDataset augmented with per-trajectory control vectors.
+    Returns a current-context window AND a fixed-length prompt trajectory
+    sampled from the same style.
 
-    Controls are derived from episode_summary (same logic as MiniGridDataset in
-    pdt_vae_with_prior.py), with a fallback to canonical style-level vectors
-    when episode_summary is unavailable.
+    Prompt sampling follows prompt_utils.get_prompt() from the PromptDT paper:
+      - Takes the last `prompt_length` steps of the reference trajectory
+        (si = max(0, traj_len - prompt_length)), so the prompt always has a
+        fixed, well-defined length rather than varying by trajectory.
+    Batch item:
+        s, a, r, d, rtg, ti, m            – current window
+                                             length: max_len
+        p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m  – prompt
+                                             length: prompt_length
+        task_label
     """
 
     def __init__(
@@ -80,7 +68,7 @@ class ControlDataset(TrajectoryDataset):
         state_normalization_factor: float = 1,
         action_normalization_factor: float = 1,
         device: str = "cpu",
-        control_dim: int = CONTROL_DIM,
+        prompt_length: int = None,        # steps per prompt episode; defaults to max_len
     ):
         super().__init__(
             trajectory_paths=trajectory_paths,
@@ -96,7 +84,67 @@ class ControlDataset(TrajectoryDataset):
             action_normalization_factor=action_normalization_factor,
             device=device,
         )
-        self.control_dim = control_dim
+
+        self.prompt_length = prompt_length
+
+        # Pre-build style → index lookup so prompt sampling is O(1)
+        self.style_to_indices: dict = {}
+        for idx in self.indices:
+            label = int(self.tasks[idx])
+            self.style_to_indices.setdefault(label, []).append(idx)
+
+    # ------------------------------------------------------------------
+    def get_prompt_traj(self, traj_index: int):
+        """
+        Returns the last self.prompt_length steps of the trajectory,
+        padded to exactly self.prompt_length.
+
+        Matches prompt_utils.get_prompt() from the PromptDT paper:
+            si = max(0, traj_len - prompt_length)
+        RTG is computed as cumulative sum from right (returns-to-go).
+        """
+        traj_rewards = self.rewards[traj_index]
+        traj_states  = self.states[traj_index]
+        traj_actions = self.actions[traj_index]
+        traj_dones   = self.dones[traj_index]
+        traj_len     = traj_rewards.shape[0]
+
+        # Random start in [0, traj_len - prompt_length] so the slice always has
+        # prompt_length steps and the last prompt_length steps can be selected.
+        si  = random.randint(0, max(0, traj_len - self.prompt_length))
+        end = si + self.prompt_length
+
+        s   = traj_states[si:end].reshape(1, -1, *self.state_dim)
+        a   = traj_actions[si:end].reshape(1, -1, *self.act_dim)
+        r   = traj_rewards[si:end].reshape(1, -1, 1)
+        d   = traj_dones[si:end].reshape(1, -1)
+        ti  = np.arange(si, si + s.shape[1]).reshape(1, -1)
+
+        # RTG: cumulative sum of rewards from each step to end of trajectory.
+        # Convert to numpy first — PyTorch tensors don't support [::-1] slicing.
+        rewards_np = traj_rewards.numpy() if isinstance(traj_rewards, torch.Tensor) else np.asarray(traj_rewards)
+        rtg_vals = np.cumsum(rewards_np[si:][::-1])[::-1]
+        rtg = rtg_vals[:s.shape[1]].reshape(1, -1, 1)
+
+        actual_len = s.shape[1]
+        padding    = self.prompt_length - actual_len
+
+        s   = self.add_padding(s,   0,         padding)
+        a   = self.add_padding(a,   -10,        padding)
+        r   = self.add_padding(r,   0,          padding)
+        d   = self.add_padding(d,   2,          padding)
+        ti  = self.add_padding(ti,  0,          padding)
+        rtg = self.add_padding(rtg, 0,          padding)
+        m   = self.add_padding(np.ones((1, actual_len)), 0, padding)
+
+        s   = (s   - self.state_mean) / self.state_std
+        rtg = rtg  / self.rtg_scale
+
+        if self.preprocess_observations is not None:
+            s = self.preprocess_observations(torch.from_numpy(s).float())
+            s = s.numpy()
+
+        return self.return_tensors(s, a, r, rtg, d, ti, m)
 
     # ------------------------------------------------------------------
     def get_traj(self, traj_index: int, max_len: int = 100, prob_go_from_end=None):
@@ -119,12 +167,12 @@ class ControlDataset(TrajectoryDataset):
 
         tlen    = s.shape[1]
         padding = max_len - tlen
-        s   = self.add_padding(s,   0,         padding)
-        a   = self.add_padding(a,   -10,        padding)
-        r   = self.add_padding(r,   0,          padding)
+        s   = self.add_padding(s,   0,    padding)
+        a   = self.add_padding(a,   -10,  padding)
+        r   = self.add_padding(r,   0,    padding)
         rtg = self.add_padding(rtg, rtg[0, -1], padding)
-        d   = self.add_padding(d,   2,          padding)
-        ti  = self.add_padding(ti,  0,          padding)
+        d   = self.add_padding(d,   2,    padding)
+        ti  = self.add_padding(ti,  0,    padding)
         m   = self.add_padding(np.ones((1, tlen)), 0, padding)
 
         s   = (s   - self.state_mean) / self.state_std
@@ -135,68 +183,84 @@ class ControlDataset(TrajectoryDataset):
     # ------------------------------------------------------------------
     def __getitem__(self, idx: int):
         traj_index = self.indices[idx]
+        task_label = int(self.tasks[traj_index])
+
+        # current context window
         s, a, r, d, rtg, ti, m = self.get_traj(
             traj_index,
             max_len=self.max_len,
             prob_go_from_end=self.prob_go_from_end,
         )
-        control = torch.tensor(self.controls[traj_index], dtype=torch.float32)
-        task_label = int(self.tasks[traj_index])
+
+        candidates = self.style_to_indices.get(task_label, [traj_index])
+        other = [i for i in candidates if i != traj_index]
+
+        p_idx = random.choice(other) if other else traj_index
+        p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = self.get_prompt_traj(p_idx)
 
         if self.preprocess_observations is not None:
             s = self.preprocess_observations(s)
 
-        return s, a, r, d, rtg, ti, m, control, task_label
+        return s, a, r, d, rtg, ti, m, p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m, task_label
 
     # ------------------------------------------------------------------
     @staticmethod
     def collate_fn(batch):
         (
             states, actions, rewards, dones, rtgs, timesteps, masks,
-            controls, task_labels,
+            p_states, p_actions, p_rewards, p_dones, p_rtgs, p_timesteps, p_masks,
+            task_labels,
         ) = zip(*batch)
 
         return {
-            "states":         torch.stack(states,    dim=0),
-            "actions":        torch.stack(actions,   dim=0),
-            "rewards":        torch.stack(rewards,   dim=0),
-            "returns_to_go":  torch.stack(rtgs,      dim=0),
-            "timesteps":      torch.stack(timesteps, dim=0),
-            "attention_mask": torch.stack(masks,     dim=0),
-            "dones":          torch.stack(dones,     dim=0),
-            "controls":       torch.stack(controls,  dim=0),
-            "task_labels":    torch.tensor(task_labels, dtype=torch.long),
+            "states":           torch.stack(states,    dim=0),
+            "actions":          torch.stack(actions,   dim=0),
+            "rewards":          torch.stack(rewards,   dim=0),
+            "returns_to_go":    torch.stack(rtgs,      dim=0),
+            "timesteps":        torch.stack(timesteps, dim=0),
+            "attention_mask":   torch.stack(masks,     dim=0),
+            "dones":            torch.stack(dones,     dim=0),
+            # prompt
+            "prompt_states":        torch.stack(p_states,    dim=0),
+            "prompt_actions":       torch.stack(p_actions,   dim=0),
+            "prompt_rewards":       torch.stack(p_rewards,   dim=0),
+            "prompt_returns_to_go": torch.stack(p_rtgs,      dim=0),
+            "prompt_timesteps":     torch.stack(p_timesteps, dim=0),
+            "prompt_attention_mask":torch.stack(p_masks,     dim=0),
+            "prompt_dones":         torch.stack(p_dones,     dim=0),
+            # label
+            "task_labels": torch.tensor(task_labels, dtype=torch.long),
         }
 
 
 # =============================================================================
-# Control-Conditioned Decision Transformer
+# Prompting Decision Transformer
 # =============================================================================
 
-class ControlConditionedDT(nn.Module):
+class PromptingDecisionTransformer(nn.Module):
     """
-    Decision Transformer conditioned on a designer control vector.
+    Decision Transformer with trajectory prompting (PromptDT).
 
-    The control vector (control_dim floats in [0,1]) is projected to 3 style
-    tokens via a 2-layer MLP and prepended before the (rtg, state, action)
-    sequence — exactly matching the style-token scheme in pdt_vae_with_prior.py:
+    A reference trajectory (prompt) is prepended to the current context as
+    (rtg, state, action) token triples before being fed to the transformer.
+    Separate embedding weights are used for prompt and current-context tokens,
+    following the PromptDT paper.  LayerNorm is applied to the current-context
+    tokens only, matching the reference implementation.
 
-        [ctrl_tok_0, ctrl_tok_1, ctrl_tok_2 | rtg_1, s_1, a_1, rtg_2, ...]
+    prompt is passed as a 7-tuple:
+        (states, actions, rewards, dones, returns_to_go, timesteps, attention_mask)
 
-    Using 3 tokens (same as the latent_dim of the VAE) keeps the architecture
-    identical to pdt_vae_with_prior.py while bypassing the encoder entirely.
+    When prompt is None the model behaves as a vanilla Decision Transformer.
 
-    Note: actions are discrete integers → nn.Embedding (MiniGrid, 7 actions).
+    Note: actions are discrete integers → nn.Embedding is used instead of
+    nn.Linear (MiniGrid has 7 discrete actions).
     """
-
-    NUM_STYLE_TOKENS = 3  # matches latent_dim in pdt_vae_with_prior.py
 
     def __init__(
         self,
-        state_dim:   int,
-        act_dim:     int,
+        state_dim: int,
+        act_dim:   int,
         hidden_size: int,
-        control_dim: int = CONTROL_DIM,
         max_length:  Optional[int] = None,
         max_ep_len:  int = 4096,
         action_tanh: bool = True,
@@ -206,7 +270,6 @@ class ControlConditionedDT(nn.Module):
         self.state_dim   = state_dim
         self.act_dim     = act_dim
         self.hidden_size = hidden_size
-        self.control_dim = control_dim
         self.max_length  = max_length
 
         config = transformers.GPT2Config(
@@ -219,27 +282,20 @@ class ControlConditionedDT(nn.Module):
         self.embed_return   = nn.Linear(1, hidden_size)
         self.embed_state    = nn.Linear(state_dim, hidden_size)
         self.embed_action   = nn.Embedding(act_dim, hidden_size)
-        self.embed_ln       = nn.LayerNorm(hidden_size)
 
-        # Control vector → style tokens (mirrors z_to_style_tokens in VAE model)
-        self.control_to_style_tokens = nn.Sequential(
-            nn.Linear(control_dim, self.NUM_STYLE_TOKENS * hidden_size),
-            # nn.GELU(),
-            # nn.Linear(self.NUM_STYLE_TOKENS * hidden_size, self.NUM_STYLE_TOKENS * hidden_size),
-        )
+        # Separate prompt embeddings (independent weights, following PromptDT)
+        self.prompt_embed_timestep = nn.Embedding(max_ep_len, hidden_size)
+        self.prompt_embed_return   = nn.Linear(1, hidden_size)
+        self.prompt_embed_state    = nn.Linear(state_dim, hidden_size)
+        self.prompt_embed_action   = nn.Embedding(act_dim, hidden_size)
+
+        self.embed_ln = nn.LayerNorm(hidden_size)
 
         self.predict_state  = nn.Linear(hidden_size, state_dim)
         self.predict_action = nn.Sequential(
             *([nn.Linear(hidden_size, act_dim)] + ([nn.Tanh()] if action_tanh else []))
         )
         self.predict_return = nn.Linear(hidden_size, 1)
-
-    # ------------------------------------------------------------------
-    def controls_to_style_tokens(self, controls: torch.Tensor) -> torch.Tensor:
-        """controls: [B, control_dim] → style_tokens: [B, NUM_STYLE_TOKENS, H]"""
-        return self.control_to_style_tokens(controls).view(
-            controls.size(0), self.NUM_STYLE_TOKENS, self.hidden_size
-        )
 
     # ------------------------------------------------------------------
     def forward(
@@ -249,8 +305,8 @@ class ControlConditionedDT(nn.Module):
         rewards,
         returns_to_go,
         timesteps,
-        controls,
         attention_mask=None,
+        prompt=None,
     ):
         batch_size, seq_length = states.shape[0], states.shape[1]
 
@@ -259,50 +315,83 @@ class ControlConditionedDT(nn.Module):
                 (batch_size, seq_length), dtype=torch.long, device=states.device
             )
 
-        # ------ embed current context (rtg, state, action) -------------------
+        # ------ embed current context ----------------------------------------
         acts = torch.clamp(actions.long().squeeze(-1), 0, self.act_dim - 1)
         if returns_to_go.ndim == 2:
             returns_to_go = returns_to_go.unsqueeze(-1)
 
-        time_emb   = self.embed_timestep(timesteps)
+        time_embeddings    = self.embed_timestep(timesteps)
         states = states.reshape(batch_size, seq_length, -1)
-        state_emb  = self.embed_state(states)          + time_emb
-        action_emb = self.embed_action(acts)           + time_emb
-        return_emb = self.embed_return(returns_to_go)  + time_emb
+        state_embeddings   = self.embed_state(states)   + time_embeddings
+        action_embeddings  = self.embed_action(acts)    + time_embeddings
+        returns_embeddings = self.embed_return(returns_to_go) + time_embeddings
 
         stacked_inputs = (
-            torch.stack((return_emb, state_emb, action_emb), dim=1)
+            torch.stack((returns_embeddings, state_embeddings, action_embeddings), dim=1)
             .permute(0, 2, 1, 3)
             .reshape(batch_size, 3 * seq_length, self.hidden_size)
         )
-        stacked_inputs = self.embed_ln(stacked_inputs)
+        stacked_inputs = self.embed_ln(stacked_inputs)   # LN on current context only
 
-        stacked_mask = (
+        stacked_attention_mask = (
             torch.stack((attention_mask, attention_mask, attention_mask), dim=1)
             .permute(0, 2, 1)
             .reshape(batch_size, 3 * seq_length)
         )
 
-        # ------ embed control → style tokens, prepend ----------------------
-        style_tokens = self.controls_to_style_tokens(controls) # [B, 3, H]
-        style_mask   = torch.ones(
-            (batch_size, self.NUM_STYLE_TOKENS),
-            dtype=stacked_mask.dtype, device=states.device
+        # ------ embed & prepend prompt ---------------------------------------
+        if prompt is not None:
+            (
+                p_states, p_actions, p_rewards, p_dones,
+                p_returns_to_go, p_timesteps, p_attention_mask,
+            ) = prompt
+            prompt_seq_length = p_states.shape[1]
+
+            p_acts = torch.clamp(p_actions.long().squeeze(-1), 0, self.act_dim - 1)
+            if p_returns_to_go.ndim == 2:
+                p_returns_to_go = p_returns_to_go.unsqueeze(-1)
+
+            p_time_embeddings    = self.prompt_embed_timestep(p_timesteps)
+            p_states = p_states.reshape(batch_size, prompt_seq_length, -1)
+            p_state_embeddings   = self.prompt_embed_state(p_states)   + p_time_embeddings
+            p_action_embeddings  = self.prompt_embed_action(p_acts)    + p_time_embeddings
+            p_returns_embeddings = self.prompt_embed_return(p_returns_to_go) + p_time_embeddings
+
+            prompt_stacked_inputs = (
+                torch.stack(
+                    (p_returns_embeddings, p_state_embeddings, p_action_embeddings), dim=1
+                )
+                .permute(0, 2, 1, 3)
+                .reshape(p_states.shape[0], 3 * prompt_seq_length, self.hidden_size)
+            )
+            prompt_stacked_attention_mask = (
+                torch.stack(
+                    (p_attention_mask, p_attention_mask, p_attention_mask), dim=1
+                )
+                .permute(0, 2, 1)
+                .reshape(p_states.shape[0], 3 * prompt_seq_length)
+            )
+
+            # broadcast a single shared prompt to the full batch
+            if prompt_stacked_inputs.shape[0] != batch_size:
+                prompt_stacked_inputs         = prompt_stacked_inputs.expand(batch_size, -1, -1)
+                prompt_stacked_attention_mask = prompt_stacked_attention_mask.expand(batch_size, -1)
+
+            stacked_inputs         = torch.cat([prompt_stacked_inputs,         stacked_inputs],         dim=1)
+            stacked_attention_mask = torch.cat([prompt_stacked_attention_mask, stacked_attention_mask], dim=1)
+
+        transformer_outputs = self.transformer(
+            inputs_embeds=stacked_inputs,
+            attention_mask=stacked_attention_mask,
         )
+        x = transformer_outputs["last_hidden_state"]
 
-        # [B, 3 + 3T, H]
-        all_tokens = torch.cat([style_tokens, stacked_inputs], dim=1)
-        all_mask   = torch.cat([style_mask,   stacked_mask],   dim=1)
+        if prompt is None:
+            x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
+        else:
+            x = x.reshape(batch_size, -1, 3, self.hidden_size).permute(0, 2, 1, 3)
 
-        x = self.transformer(
-            inputs_embeds=all_tokens, attention_mask=all_mask
-        )["last_hidden_state"]    # [B, 3+3T, H]
-
-        # Reshape treating every 3 consecutive tokens as one timestep.
-        # The 3 style tokens occupy "timestep 0"; actual timesteps follow.
-        # [:, -seq_length:, :] extracts only the current-context positions.
-        x = x.reshape(batch_size, -1, 3, self.hidden_size).permute(0, 2, 1, 3)
-
+        # note: prompt tokens are pre-pended; slice the last seq_length steps only
         return_preds = self.predict_return(x[:, 2])[:, -seq_length:, :]
         state_preds  = self.predict_state(x[:, 2])[:, -seq_length:, :]
         action_preds = self.predict_action(x[:, 1])[:, -seq_length:, :]
@@ -310,16 +399,18 @@ class ControlConditionedDT(nn.Module):
         return state_preds, action_preds, return_preds
 
     # ------------------------------------------------------------------
-    def get_action(self, states, actions, rewards, returns_to_go, timesteps, controls, **kwargs):
+    def get_action(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
         """
-        Inference helper: pads/trims context to max_length, returns action
-        logits for the last timestep.
+        Inference helper: pads/trims context to max_length, returns the
+        predicted action logits for the last timestep.
+
+        Pass prompt as a keyword argument, e.g.:
+            model.get_action(..., prompt=(p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m))
         """
         states        = states.reshape(1, -1, self.state_dim)
         actions       = actions.reshape(1, -1)
         returns_to_go = returns_to_go.reshape(1, -1, 1)
         timesteps     = timesteps.reshape(1, -1)
-        controls      = controls.reshape(1, self.control_dim)
 
         if self.max_length is not None:
             states        = states[:, -self.max_length:]
@@ -347,7 +438,7 @@ class ControlConditionedDT(nn.Module):
             attention_mask = None
 
         _, action_preds, _ = self.forward(
-            states, actions, None, returns_to_go, timesteps, controls,
+            states, actions, None, returns_to_go, timesteps,
             attention_mask=attention_mask, **kwargs
         )
         return action_preds[0, -1]
@@ -357,9 +448,9 @@ class ControlConditionedDT(nn.Module):
 # Online Evaluation
 # =============================================================================
 
-def evaluate_online_control(
-    eval_model:             ControlConditionedDT,
-    eval_dataset:           ControlDataset,
+def evaluate_online_prompting(
+    eval_model:             PromptingDecisionTransformer,
+    eval_dataset:           PromptDataset,
     num_styles:             int   = 3,
     num_episodes_per_style: int   = 10,
     max_ep_len:             int   = 100,
@@ -368,8 +459,8 @@ def evaluate_online_control(
     env_kwargs:             dict  = None,
 ):
     """
-    For each style, roll out the model conditioned on that style's canonical
-    control vector (STYLE_CONTROLS).
+    For each style, sample one representative prompt trajectory from the dataset
+    and roll out the model conditioned on it via get_action.
 
     Returns:
         results: {style_id: [episode_returns]}
@@ -380,43 +471,38 @@ def evaluate_online_control(
         env_kwargs = {}
         env_kwargs["max_steps"] = 100
 
-    # [risk_tolerance, resource_pref, stealth_pref, safety_pref, commitment]
-    # Fallback when dataset has no controls stored (should not happen with new datasets).
-    # fallback_style_to_controls = {
-    #     0: np.array([0.67, 0.01, 0.53, 0.53, 0.82], dtype=np.float32),  # bypass
-    #     1: np.array([0.92, 0.51, 0.00, 0.00, 0.59], dtype=np.float32),  # weapon
-    #     2: np.array([0.92, 0.53, 1.00, 0.63, 0.74], dtype=np.float32),  # camouflage
-    # }
-
     state_mean = torch.tensor(eval_dataset.state_mean, device=eval_device, dtype=torch.float32)
     state_std  = torch.tensor(eval_dataset.state_std,  device=eval_device, dtype=torch.float32)
 
-    results = {s: [] for s in range(num_styles)}
+    results = {s: [] for s in range(len(style_names))}
     # Per-episode 1.0/0.0 success flags (achieved_style == target_style).
-    success = {s: [] for s in range(num_styles)}
+    success = {style_id: [] for style_id in range(num_styles)}
 
     with torch.no_grad():
-        for style_id in range(num_styles):
-            c = None
+        for style_id in range(len(style_names)):
+            candidates = eval_dataset.style_to_indices.get(style_id, [])
+            if not candidates:
+                print(f"  No trajectories for style {style_id}, skipping.")
+                continue
 
-            # if hasattr(dataset, "controls") and dataset.controls is not None:
-            # sample one trajectory index of this style and take its controls
-            style_indices = [i for i, label in enumerate(dataset.tasks) if label == style_id]
-            if len(style_indices) > 0:
-                traj_idx = random.choice(style_indices)
-                c = dataset.controls[traj_idx]  # numpy array [control_dim]
-                c = np.asarray(c, dtype=np.float32)
 
-            # if c is None:
-            #     c = fallback_style_to_controls[style_id]
+            prompt_idx = random.choice(candidates)
+            p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m = eval_dataset.get_prompt_traj(prompt_idx)
 
-            control = torch.tensor(c, dtype=torch.float32, device=device).unsqueeze(0)
-
+            # add batch dim and move to device
+            p_s   = p_s.unsqueeze(0).to(eval_device)
+            p_a   = p_a.unsqueeze(0).to(eval_device)
+            p_r   = p_r.unsqueeze(0).to(eval_device)
+            p_d   = p_d.unsqueeze(0).to(eval_device)
+            p_rtg = p_rtg.unsqueeze(0).to(eval_device)
+            p_ti  = p_ti.unsqueeze(0).to(eval_device)
+            p_m   = p_m.unsqueeze(0).float().to(eval_device)
+            prompt_tuple = (p_s, p_a, p_r, p_d, p_rtg, p_ti, p_m)
 
             for ep in range(num_episodes_per_style):
-                if "portal" in STYLE_NAMES.values():
+                if "portal" in style_names.values():
                     env = MiniGridFourStyles(
-                        target_style=STYLE_NAMES[style_id],
+                        target_style=style_names[style_id],
                         target_bonus=1.0,
                         non_target_penalty=-1.0,
                         agent_view_size=3,
@@ -424,9 +510,9 @@ def evaluate_online_control(
                         eval_mode=True,   # zero PPO-only shaping -> returns match offline data
                         **env_kwargs,
                     )
-                elif len(STYLE_NAMES) == 3:
+                elif len(style_names) == 3:
                     env = MiniGridThreeStyles(
-                        target_style=STYLE_NAMES[style_id],
+                        target_style=style_names[style_id],
                         target_bonus=1.0,
                         non_target_penalty=-1.0,
                         easy_env=False,
@@ -436,7 +522,7 @@ def evaluate_online_control(
                     )
                 else:
                     env = MiniGridMultiStyles(
-                        target_style=STYLE_NAMES[style_id],
+                        target_style=style_names[style_id],
                         target_bonus=1.0,
                         non_target_penalty=-1.0,
                         agent_view_size=3,
@@ -445,7 +531,7 @@ def evaluate_online_control(
                     )
                 obs, _ = env.reset(seed=42 + ep)
 
-                if len(STYLE_NAMES) == 3:
+                if len(style_names) == 3:
                     state = torch.from_numpy(
                         obs["image"][:, :, 0].flatten()
                     ).float().to(eval_device)
@@ -455,11 +541,12 @@ def evaluate_online_control(
                     ).float().to(eval_device)
                 state = (state - state_mean.flatten()) / state_std.flatten()
 
-                s_hist   = state.unsqueeze(0)
-                a_hist   = torch.zeros(1, dtype=torch.long, device=eval_device)
-                r_hist   = torch.zeros(1, device=eval_device)
-                rtg_hist = torch.tensor([initial_rtg], device=eval_device)
-                ti_hist  = torch.tensor([0], dtype=torch.long, device=eval_device)
+                # history buffers (grow each step; get_action handles windowing)
+                s_hist  = state.unsqueeze(0)                                      # [1, state_dim]
+                a_hist  = torch.zeros(1, dtype=torch.long, device=eval_device)    # [1]
+                r_hist  = torch.zeros(1, device=eval_device)                      # [1]
+                rtg_hist = torch.tensor([initial_rtg], device=eval_device)        # [1]
+                ti_hist  = torch.tensor([0], dtype=torch.long, device=eval_device)# [1]
 
                 episode_return = 0.0
                 done = False
@@ -472,7 +559,7 @@ def evaluate_online_control(
                         rewards=r_hist,
                         returns_to_go=rtg_hist,
                         timesteps=ti_hist,
-                        controls=control,
+                        prompt=prompt_tuple,
                     )
                     action = torch.argmax(action_logits, dim=-1).item()
 
@@ -482,7 +569,8 @@ def evaluate_online_control(
                     t += 1
 
                     if not done:
-                        if len(STYLE_NAMES) == 3:
+
+                        if len(style_names) == 3:
                             ns = torch.from_numpy(
                                 next_obs["image"][:, :, 0].flatten()
                             ).float().to(eval_device)
@@ -492,25 +580,25 @@ def evaluate_online_control(
                             ).float().to(eval_device)
                         ns = (ns - state_mean.flatten()) / state_std.flatten()
 
-                        s_hist   = torch.cat([s_hist,   ns.unsqueeze(0)],                                          dim=0)
-                        a_hist   = torch.cat([a_hist,   torch.tensor([action],  dtype=torch.long, device=eval_device)])
-                        r_hist   = torch.cat([r_hist,   torch.tensor([reward],                    device=eval_device)])
+                        s_hist   = torch.cat([s_hist,   ns.unsqueeze(0)],                                        dim=0)
+                        a_hist   = torch.cat([a_hist,   torch.tensor([action], dtype=torch.long, device=eval_device)])
+                        r_hist   = torch.cat([r_hist,   torch.tensor([reward], device=eval_device)])
                         rtg_hist = torch.cat([rtg_hist, (rtg_hist[-1:] - reward).clamp(min=0)])
-                        ti_hist  = torch.cat([ti_hist,  torch.tensor([t],       dtype=torch.long, device=eval_device)])
+                        ti_hist  = torch.cat([ti_hist,  torch.tensor([t], dtype=torch.long, device=eval_device)])
 
                 results[style_id].append(episode_return)
-                # An episode succeeds only if the style the env actually
-                # registered matches the requested target style.
+                # An episode succeeds only if it reached the goal AND the style
+                # the env actually registered matches the requested target style.
                 achieved = info.get("achieved_style")
                 if achieved is None and isinstance(info.get("episode_summary"), dict):
                     achieved = info["episode_summary"].get("achieved_style")
                 success[style_id].append(
-                    1.0 if achieved == STYLE_NAMES[style_id] else 0.0
+                    1.0 if achieved == style_names[style_id] else 0.0
                 )
                 env.close()
 
             print(
-                f"[control] Style {style_id} ({STYLE_NAMES[style_id]}): "
+                f"[prompt] Style {style_id} ({style_names[style_id]}): "
                 f"success = {np.mean(success[style_id]):.2f} "
                 f"| mean return = {np.mean(results[style_id]):.3f}"
                 f" ± {np.std(results[style_id]):.3f}"
@@ -524,7 +612,7 @@ def evaluate_online_control(
 # Plotting
 # =============================================================================
 
-def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_control.png"):
+def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_prompt.png"):
     """Plot the online evaluation results for each style over training.
 
     Primary plot is the per-style success rate (achieved_style == target_style),
@@ -535,10 +623,10 @@ def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_c
 
     # Success-rate plot (primary metric)
     plt.figure(figsize=(10, 6))
-    for style_id in range(len(STYLE_NAMES)):
+    for style_id in range(len(style_names)):
         rates = eval_history[f"style_{style_id}"]
         plt.plot(epochs, rates, marker="o",
-                 label=f"{STYLE_NAMES[style_id].capitalize()} (Style {style_id})", linewidth=2)
+                 label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
     plt.xlabel("Epoch", fontsize=12)
     plt.ylabel("Success Rate (achieved == target)", fontsize=12)
     plt.ylim(-0.02, 1.02)
@@ -551,13 +639,13 @@ def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_c
     plt.close()
 
     # Companion return plot, if returns were tracked
-    if any(f"style_{s}_return" in eval_history for s in range(len(STYLE_NAMES))):
+    if any(f"style_{s}_return" in eval_history for s in range(len(style_names))):
         ret_path = save_path.replace(".png", "_return.png")
         plt.figure(figsize=(10, 6))
-        for style_id in range(len(STYLE_NAMES)):
+        for style_id in range(len(style_names)):
             returns = eval_history.get(f"style_{style_id}_return", [])
             plt.plot(epochs, returns, marker="o",
-                     label=f"{STYLE_NAMES[style_id].capitalize()} (Style {style_id})", linewidth=2)
+                     label=f"{style_names[style_id]} (Style {style_id})", linewidth=2)
         plt.xlabel("Epoch", fontsize=12)
         plt.ylabel("Mean Episode Return", fontsize=12)
         plt.title("Online Evaluation: Episode Returns by Style", fontsize=14)
@@ -565,7 +653,7 @@ def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_c
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(ret_path, dpi=150)
-        print(f"Saved {ret_path}")
+        print(f"Saved return evaluation plot to {ret_path}")
         plt.close()
 
 
@@ -573,19 +661,19 @@ def plot_eval_results(eval_history: dict, save_path: str = "plots/eval_results_c
 # Training
 # =============================================================================
 
-def train_control_dt(
-    model:                   ControlConditionedDT,
-    dataloader:              DataLoader,
-    num_epochs:              int,
-    device:                  str   = "cpu",
-    lr:                      float = 1e-4,
-    grad_clip:               float = 1.0,
-    log_every:               int   = 10,
-    save_path:               str   = None,
-    eval_every:              int   = 10,
-    eval_episodes_per_style: int   = 50,
-    max_ep_len:              int   = 100,
-    initial_rtg:             float = 2.5,
+def train_prompting_dt(
+    model:               PromptingDecisionTransformer,
+    dataloader:          DataLoader,
+    num_epochs:          int,
+    device:              str   = "cpu",
+    lr:                  float = 1e-4,
+    grad_clip:           float = 1.0,
+    log_every:           int   = 10,
+    save_path:           str   = None,
+    eval_every:          int   = 10,
+    eval_episodes_per_style: int = 50,
+    max_ep_len:          int   = 100,
+    initial_rtg:         float = 2.5,
 ):
     model.to(device)
     model.train()
@@ -594,9 +682,10 @@ def train_control_dt(
     # Track evaluation results. `style_{id}` holds the success rate (primary
     # metric, the curve we plot); `style_{id}_return` keeps the mean return.
     eval_history = {"epochs": []}
-    for style_id in range(len(STYLE_NAMES)):
+    for style_id in range(len(style_names)):
         eval_history[f"style_{style_id}"] = []
         eval_history[f"style_{style_id}_return"] = []
+
 
     for epoch in range(num_epochs):
         running_loss = 0.0
@@ -609,7 +698,16 @@ def train_control_dt(
             rtgs      = batch["returns_to_go"].to(device)
             timesteps = batch["timesteps"].to(device)
             attn_mask = batch["attention_mask"].to(device)
-            controls  = batch["controls"].to(device)
+
+            p_states    = batch["prompt_states"].to(device)
+            p_actions   = batch["prompt_actions"].to(device)
+            p_rewards   = batch["prompt_rewards"].to(device)
+            p_dones     = batch["prompt_dones"].to(device)
+            p_rtgs      = batch["prompt_returns_to_go"].to(device)
+            p_timesteps = batch["prompt_timesteps"].to(device)
+            p_mask      = batch["prompt_attention_mask"].float().to(device)
+
+            prompt = (p_states, p_actions, p_rewards, p_dones, p_rtgs, p_timesteps, p_mask)
 
             _, action_preds, _ = model(
                 states=states,
@@ -617,17 +715,18 @@ def train_control_dt(
                 rewards=rewards,
                 returns_to_go=rtgs,
                 timesteps=timesteps,
-                controls=controls,
                 attention_mask=attn_mask,
+                prompt=prompt,
             )
 
             b, t, c = action_preds.shape
             acts_ce = actions.squeeze(-1) if actions.ndim == 3 else actions
             acts_ce = torch.clamp(acts_ce.long(), 0, c - 1)
 
-            ce   = torch.nn.functional.cross_entropy(
-                action_preds.reshape(b * t, c), acts_ce.reshape(b * t), reduction="none"
-            ).reshape(b, t)
+            logits  = action_preds.reshape(b * t, c)
+            targets = acts_ce.reshape(b * t)
+
+            ce    = torch.nn.functional.cross_entropy(logits, targets, reduction="none").reshape(b, t)
             valid = attn_mask.float()
             loss  = (ce * valid).sum() / valid.sum().clamp_min(1.0)
 
@@ -653,10 +752,10 @@ def train_control_dt(
 
         if eval_every > 0 and (epoch + 1) % eval_every == 0:
             print(f"\n=== Online Evaluation at Epoch {epoch + 1} ===")
-            eval_results, eval_success = evaluate_online_control(
+            eval_results, eval_success = evaluate_online_prompting(
                 eval_model=model,
                 eval_dataset=dataloader.dataset,
-                num_styles=len(STYLE_NAMES),
+                num_styles=len(style_names),
                 num_episodes_per_style=eval_episodes_per_style,
                 max_ep_len=max_ep_len,
                 eval_device=device,
@@ -664,9 +763,9 @@ def train_control_dt(
             )
             # Record results: success rate (primary) and mean return.
             eval_history["epochs"].append(epoch + 1)
-            for style_id in range(len(STYLE_NAMES)):
+            for style_id in range(len(style_names)):
                 success_rate = np.mean(eval_success[style_id]) if eval_success[style_id] else 0.0
-                mean_return  = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
+                mean_return = np.mean(eval_results[style_id]) if eval_results[style_id] else 0.0
                 eval_history[f"style_{style_id}"].append(success_rate)
                 eval_history[f"style_{style_id}_return"].append(mean_return)
             print()
@@ -696,18 +795,17 @@ if __name__ == "__main__":
         "state_normalization_factor":  1,
         "action_normalization_factor": 1,
         "max_len":                    max_len,
-        "control_dim":                CONTROL_DIM,
+        "prompt_length":              2,   # steps per prompt episode (last N steps)
     }
-    dataset = ControlDataset(trajectory_paths=paths, **dataset_params)
+    dataset = PromptDataset(trajectory_paths=paths, **dataset_params)
     loader  = DataLoader(
         dataset, batch_size=32, shuffle=True, collate_fn=dataset.collate_fn
     )
 
-    model = ControlConditionedDT(
+    model = PromptingDecisionTransformer(
         state_dim=9,
         act_dim=7,
         hidden_size=128,
-        control_dim=CONTROL_DIM,
         max_length=max_len,
         max_ep_len=100,
         action_tanh=False,
@@ -715,13 +813,13 @@ if __name__ == "__main__":
         n_head=8,
     )
 
-    train_control_dt(
+    train_prompting_dt(
         model=model,
         dataloader=loader,
-        num_epochs=50,
+        num_epochs=100,
         device=device,
         lr=1e-3,
         grad_clip=1.0,
         log_every=10,
-        save_path="trained_models/control_dt_minigrid.pth",
+        save_path="trained_models/prompt_dt_minigrid.pth",
     )

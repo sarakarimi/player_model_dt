@@ -24,10 +24,10 @@ from torch.optim import AdamW
 from torch.utils.data import Dataset, DataLoader
 
 from dataset_utils.minigrid_trajectory_dataset import TrajectoryDataset
-from envs.multi_style_env import MiniGridMultiStyles
-from envs.three_style_env import MiniGridThreeStyles
-from envs.four_style_env import MiniGridFourStyles
-from style_decision_transformer.style_pdt_vae.paths import paths
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
+from envs.three_style_minigrid_env import MiniGridThreeStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
+from style_decision_transformer.paths import paths
 
 
 # STYLE_NAMES = {0: "bypass", 1: "weapon", 2: "camouflage"} # three style env

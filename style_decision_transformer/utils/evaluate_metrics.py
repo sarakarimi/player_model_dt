@@ -36,7 +36,7 @@ Latent quality (StyleVAE only, offline from dataset forward pass):
 Usage
 -----
 Run from repo root:
-    python trajectory_embedding/style_dec_vae/transformer/style_pdt_vae/evaluate_metrics.py
+    python style_decision_transformer/utils/evaluate_metrics.py
 
 Or import and call run_full_evaluation(adapter, dataset) for programmatic use.
 """
@@ -48,7 +48,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
@@ -60,28 +60,28 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
-from style_decision_transformer.style_pdt_vae.paths import paths
-from style_decision_transformer.style_pdt_vae.pdt_vae_with_prior import (
+from style_decision_transformer.paths import paths
+from style_decision_transformer.pdt_vae_with_prior import (
     MiniGridDataset,
     StyleVAEPromptDT,
     kl_q_p_diag,
 )
-from style_decision_transformer.style_pdt_vae.bc import BCPolicy
-from style_decision_transformer.style_pdt_vae.prompt_dt import (
+from style_decision_transformer.bc import BCPolicy
+from style_decision_transformer.prompt_dt import (
     PromptingDecisionTransformer,
 )
-from style_decision_transformer.style_pdt_vae.control_prompt_pdt import (
+from style_decision_transformer.control_prompt_pdt import (
     ControlConditionedDT,
 )
-from style_decision_transformer.style_pdt_vae.sorl import (
+from style_decision_transformer.sorl import (
     SODataset,
     BCPolicy as SORLPolicy,
     derive_style_map,
     print_cluster_composition,
 )
-from envs.three_style_env import MiniGridThreeStyles
-from envs.multi_style_env import MiniGridMultiStyles
-from envs.four_style_env import MiniGridFourStyles
+from envs.three_style_minigrid_env import MiniGridThreeStyles
+from envs.multi_style_minigrid_env import MiniGridMultiStyles
+from envs.four_style_minigrid_env import MiniGridFourStyles
 from dataset_utils.minigrid_trajectory_dataset import (
     controls_from_episode_summary,
     multi_style_controls_from_episode_summary,
@@ -97,9 +97,9 @@ from dataset_utils.minigrid_trajectory_dataset import (
 
 # Select which env / style set to evaluate on. Must match the dataset
 # referenced by paths.py (task labels):
-#   "four"  -> envs/four_style_env.py    (portal / weapon / camouflage / daredevil)
-#   "multi" -> envs/multi_style_env.py   (bypass / weapon / camouflage / daredevil)
-#   "three" -> envs/three_style_env.py   (bypass / weapon / camouflage)
+#   "four"  -> envs/four_style_minigrid_env.py    (portal / weapon / camouflage / daredevil)
+#   "multi" -> envs/multi_style_minigrid_env.py   (bypass / weapon / camouflage / daredevil)
+#   "three" -> envs/three_style_minigrid_env.py   (bypass / weapon / camouflage)
 ENV_KIND = "four"
 
 if ENV_KIND == "four":
@@ -1445,10 +1445,10 @@ def print_metrics_table_mean_std(mean_metrics: dict, std_metrics: dict, model_na
 if __name__ == "__main__":
     DEVICE = "cpu"
     HERE   = os.path.dirname(__file__)
-    # Checkpoints and plots live next to the training scripts in style_pdt_vae/,
-    # not in this utils/ directory (this module was moved here from there).
-    PDT_VAE_DIR = os.path.join(os.path.dirname(HERE), "style_pdt_vae")
-    MODELS_DIR  = os.path.join(PDT_VAE_DIR, "trained_models")
+    # Checkpoints and plots live next to the training scripts in
+    # style_decision_transformer/, not in this utils/ subdirectory.
+    SDT_DIR = os.path.dirname(HERE)
+    MODELS_DIR  = os.path.join(SDT_DIR, "trained_models")
     control_dim = 3
 
     dataset_params = {
@@ -1619,4 +1619,4 @@ if __name__ == "__main__":
 
     # Comparison table (mean only) + plots
     print_comparison_table(mean_metrics)
-    plot_comparison(mean_metrics, save_dir=PDT_VAE_DIR, std_metrics=std_metrics)
+    plot_comparison(mean_metrics, save_dir=SDT_DIR, std_metrics=std_metrics)
