@@ -1,6 +1,6 @@
 # Not Your Average Agent: Play-style Conditioned Decision Transformers
 
-Supplementary code for the paper **"Not Your Average Agent: Play-style Conditioned Decision Transformers"**.
+Supplementary code for the paper **"Not Your Average Agent: Play-style Conditioned Decision Transformers"** Proceedings of the 22nd AAAI Conference on Artificial Intelligence and Interactive Digital Entertainment (AIIDE 26).
 
 ## About
 
